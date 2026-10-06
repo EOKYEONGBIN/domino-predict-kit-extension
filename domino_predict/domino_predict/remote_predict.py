@@ -283,7 +283,9 @@ async def request_prediction(
     volume_flag = "true" if compute_streamlines else "false"
     await backend.run(f"{REMOTE_RUN_SCRIPT} {request_id} {surface_flag} {volume_flag}")
 
-    local_dir = tempfile.mkdtemp(prefix=f"domino_predict_{request_id}_")
+    # realpath expands 8.3 short names (C:/Users/KYEONG~1/...), which Kit's
+    # file picker can't open from the Payloads asset-path button.
+    local_dir = os.path.realpath(tempfile.mkdtemp(prefix=f"domino_predict_{request_id}_"))
     local_surface_vtp_path: str | None = None
     local_volume_vti_path: str | None = None
 

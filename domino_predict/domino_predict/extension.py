@@ -210,7 +210,9 @@ class DominoPredictExtension(omni.ext.IExt):
         # Not a TemporaryDirectory (self-cleaning) -- the stage keeps a live
         # Reference to this file, which must stay resolvable on disk for the
         # rest of the session (re-composition, stage export, etc).
-        tmp_dir = tempfile.mkdtemp(prefix="domino_predict_stl_")
+        # realpath expands 8.3 short names (C:/Users/KYEONG~1/...), which
+        # Kit's file picker can't open from the stage's asset-path buttons.
+        tmp_dir = os.path.realpath(tempfile.mkdtemp(prefix="domino_predict_stl_"))
         converted_usd_path = os.path.join(tmp_dir, "input_shape.usd")
         task_manager = asset_converter.get_instance()
         context = asset_converter.AssetConverterContext()
