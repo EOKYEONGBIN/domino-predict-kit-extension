@@ -11,11 +11,23 @@ import omni.usd
 from omni.cae.core.commands import execute_command
 from omni.cae.schema import viz as cae_viz
 from omni.cae.usd_plugins_importers import import_to_stage
-from pxr import Usd, UsdGeom
+from pxr import Gf, Usd, UsdGeom
 
 from . import remote_predict
 from .cae_viz_helpers import wait_for_operator, wait_frames
+from .legend import ColorLegend
 from .predict_window import PredictWindow
+
+
+# Fixed pMean color range for every prediction Faces, so the same pressure is
+# the same color across STLs (Kit-CAE's default auto-rescale would stretch
+# each one to its own min/max). Chosen from all 500 AhmedML CFD cases: the max
+# is ~0.52 in every case (stagnation point); the absolute min (-2.14) comes from
+# a few edge faces, so the low end uses the per-case 0.1% (by area) value
+# instead -- -1.0 covers it for 95% of cases. Values outside clamp to the end
+# colors.
+PMEAN_RANGE_MIN = -1.0
+PMEAN_RANGE_MAX = 0.52
 
 
 def _format_duration(seconds: float) -> str:
@@ -27,6 +39,7 @@ def _format_duration(seconds: float) -> str:
 class DominoPredictExtension(omni.ext.IExt):
     def on_startup(self, ext_id):
         self._request_counter = 0
+        self._legend = ColorLegend("pMean  (Cp = 2 x pMean)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX)
         settings = remote_predict.load_settings()
         self._window = PredictWindow(
             request_clicked_fn=self._on_request_clicked,
@@ -44,6 +57,9 @@ class DominoPredictExtension(omni.ext.IExt):
         asyncio.ensure_future(self._do_connect(settings["mode"], settings["ssh_host"]))
 
     def on_shutdown(self):
+        if self._legend:
+            self._legend.destroy()
+            self._legend = None
         if self._window:
             self._window.visible = False
             self._window.destroy()
@@ -240,6 +256,22 @@ class DominoPredictExtension(omni.ext.IExt):
         )
         faces_prim = stage.GetPrimAtPath(faces_path)
         cae_viz.FieldSelectionAPI(faces_prim, "colors").CreateFieldNamesAttr().Set(["pMean"])
+        await wait_frames(3)
+        # "disable" stops the operator from auto-rescaling back to this
+        # dataset's own min/max; its includes target the shader's domain.
+        # With "disable" the operator also skips switching the shader's
+        # enable_coloring on (its enableIncludes), so do that here too.
+        rescale_api = cae_viz.RescaleRangeAPI(faces_prim, "colors")
+        rescale_api.GetRescaleModeAttr().Set("disable")
+        for target_path in rescale_api.GetIncludesRel().GetTargets():
+            target_attr = stage.GetAttributeAtPath(target_path)
+            if target_attr:
+                target_attr.Set(Gf.Vec2f(PMEAN_RANGE_MIN, PMEAN_RANGE_MAX))
+        for target_path in rescale_api.GetEnableIncludesRel().GetTargets():
+            target_attr = stage.GetAttributeAtPath(target_path)
+            if target_attr:
+                target_attr.Set(True)
+        self._legend.show()
 
         # Same pattern as CAE_Examples/AhmedML/run_1/open_ahmed_cae_scene.py's
         # BoundingBox_boundary_1.

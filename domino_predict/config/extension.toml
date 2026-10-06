@@ -12,6 +12,7 @@ keywords = ["cae", "domino", "cfd", "prediction"]
 "omni.cae.schema" = {}
 "omni.cae.usd_plugins_importers" = {}
 "omni.cae.viz" = {}
+"omni.kit.viewport.utility" = {}
 
 [[python.module]]
 name = "domino_predict"
