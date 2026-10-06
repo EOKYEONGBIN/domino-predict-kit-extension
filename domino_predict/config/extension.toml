@@ -1,0 +1,17 @@
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "DoMINO Prediction"
+description = "Requests a DoMINO surface-flow prediction for the current STL from the A6000 training server, and imports the result into the stage."
+authors = ["EOKYEONGBIN"]
+keywords = ["cae", "domino", "cfd", "prediction"]
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.cae.core" = {}
+"omni.cae.schema" = {}
+"omni.cae.usd_plugins_importers" = {}
+"omni.cae.viz" = {}
+
+[[python.module]]
+name = "domino_predict"
