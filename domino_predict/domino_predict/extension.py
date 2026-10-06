@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import time
 
 import carb
 import carb.eventdispatcher
@@ -17,6 +18,12 @@ from .cae_viz_helpers import wait_for_operator, wait_frames
 from .predict_window import PredictWindow
 
 
+def _format_duration(seconds: float) -> str:
+    seconds = int(round(seconds))
+    minutes, secs = divmod(seconds, 60)
+    return f"{minutes}m {secs}s" if minutes else f"{secs}s"
+
+
 class DominoPredictExtension(omni.ext.IExt):
     def on_startup(self, ext_id):
         self._request_counter = 0
@@ -25,13 +32,15 @@ class DominoPredictExtension(omni.ext.IExt):
             request_clicked_fn=self._on_request_clicked,
             browse_clicked_fn=self._on_browse_clicked,
             connect_clicked_fn=self._on_connect_clicked,
+            mode_changed_fn=self._on_mode_changed,
+            initial_mode=settings["mode"],
             initial_host=settings["ssh_host"],
             visible=True,
         )
-        # Check the default/remembered server as soon as the extension comes
+        # Check the remembered mode/server as soon as the extension comes
         # up, instead of leaving the user to guess whether it's reachable
         # until they explicitly hit Connect.
-        asyncio.ensure_future(self._do_connect(settings["ssh_host"]))
+        asyncio.ensure_future(self._do_connect(settings["mode"], settings["ssh_host"]))
 
     def on_shutdown(self):
         if self._window:
@@ -61,27 +70,34 @@ class DominoPredictExtension(omni.ext.IExt):
     def _on_connect_clicked(self):
         asyncio.ensure_future(self._do_connect())
 
-    async def _do_connect(self, host: str | None = None):
-        # Called two ways: from the Connect button (host=None, read the
-        # field -- by then the UI has definitely been built, since the user
-        # just clicked a button in it) and from on_startup, right after
-        # construction, to auto-check the remembered server (host=<remembered
-        # value>). The startup call races the window's own deferred first
-        # build (see PredictWindow's AUDIT FIX comment) -- wait_frames keeps
-        # `set_connection_status` below from hitting `_settings_frame`
-        # before _build() has created it.
+    def _on_mode_changed(self, mode: str):
+        # The old status belonged to the other mode -- re-check right away.
+        asyncio.ensure_future(self._do_connect())
+
+    async def _do_connect(self, mode: str | None = None, host: str | None = None):
+        # Called two ways: from the UI (Connect button / mode toggle, mode and
+        # host read from the widgets -- the UI is built by then, since the
+        # user just clicked in it) and from on_startup, right after
+        # construction, with the remembered values. The startup call races
+        # the window's own deferred first build (see PredictWindow's AUDIT
+        # FIX comment) -- wait_frames keeps `set_connection_status` below
+        # from hitting widgets before _build() has created them.
         await wait_frames(3)
+        if mode is None:
+            mode = self._window.mode
         if host is None:
             host = self._window.host.strip()
-        if not host:
+        # Remember whatever the user actually chose, connected or not --
+        # they explicitly asked for it, not just for successful ones.
+        remote_predict.save_settings(mode, host)
+        if mode == remote_predict.MODE_REMOTE and not host:
             self._window.set_connection_status(False)
             return
         self._window.set_connection_status(None)
-        ok, _message = await remote_predict.test_connection(host)
+        ok, message = await remote_predict.test_connection(mode, host)
         self._window.set_connection_status(ok)
-        # Remember whatever the user actually typed, connected or not --
-        # they explicitly asked for it, not just for successful ones.
-        remote_predict.save_settings(host)
+        if not ok:
+            carb.log_warn(f"[domino_predict] {message}")
 
     async def _do_request(self):
         stl_path = self._window.stl_path.strip()
@@ -98,17 +114,22 @@ class DominoPredictExtension(omni.ext.IExt):
         self._request_counter += 1
         n = self._request_counter
 
+        mode = self._window.mode
         self._window.set_busy(True)
+        start = time.monotonic()
         try:
             self._window.set_status("Loading input shape...")
             shape_path = await self._import_input_shape(stl_path, n)
 
+            inference_start = time.monotonic()
             local_surface_path, local_volume_path = await remote_predict.request_prediction(
                 stl_path,
+                mode=mode,
                 compute_faces=compute_faces,
                 compute_streamlines=compute_streamlines,
                 progress_cb=self._window.set_status,
             )
+            inference_seconds = time.monotonic() - inference_start
             ctx = omni.usd.get_context()
             shape_prim = ctx.get_stage().GetPrimAtPath(shape_path)
             if local_surface_path is not None:
@@ -124,10 +145,14 @@ class DominoPredictExtension(omni.ext.IExt):
                 UsdGeom.Imageable(shape_prim).MakeInvisible()
             if local_volume_path is not None:
                 await self._import_volume_streamlines(local_volume_path, shape_path, n)
-            self._window.set_status("Prediction imported.")
+            where = "Local" if mode == remote_predict.MODE_LOCAL else "Remote"
+            self._window.set_status(
+                f"Prediction imported ({where}). Total {_format_duration(time.monotonic() - start)} "
+                f"(inference {_format_duration(inference_seconds)})."
+            )
         except Exception as e:
             carb.log_error(f"[domino_predict] Prediction request failed: {e}")
-            self._window.set_status(f"Error: {e}")
+            self._window.set_status(f"Error after {_format_duration(time.monotonic() - start)}: {e}")
         finally:
             self._window.set_busy(False)
 

@@ -2,7 +2,7 @@
 version = "0.1.0"
 category = "Simulation"
 title = "DoMINO Prediction"
-description = "Requests a DoMINO surface-flow prediction for the current STL from the A6000 training server, and imports the result into the stage."
+description = "Requests a DoMINO CFD prediction for an STL (on a remote server or locally in WSL2) and sets up the Kit-CAE visualization."
 authors = ["EOKYEONGBIN"]
 keywords = ["cae", "domino", "cfd", "prediction"]
 

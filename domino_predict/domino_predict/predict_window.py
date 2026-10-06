@@ -1,7 +1,9 @@
 import omni.ui as ui
 
 WINDOW_TITLE = "DoMINO Prediction"
-SETTINGS_FRAME_TITLE = "Remote Server Settings"
+
+MODE_LOCAL = "local"
+MODE_REMOTE = "remote"
 
 # omni.ui colors are 0xAABBGGRR. Material green 500 / red 500 / grey 500.
 _COLOR_CONNECTED = 0xFF50AF4C
@@ -10,64 +12,68 @@ _COLOR_CHECKING = 0xFF9E9E9E
 
 
 class PredictWindow(ui.Window):
-    def __init__(self, request_clicked_fn, browse_clicked_fn, connect_clicked_fn, initial_host: str = "", **kwargs):
-        super().__init__(WINDOW_TITLE, width=420, height=340, **kwargs)
+    def __init__(
+        self,
+        request_clicked_fn,
+        browse_clicked_fn,
+        connect_clicked_fn,
+        mode_changed_fn,
+        initial_mode: str = MODE_REMOTE,
+        initial_host: str = "",
+        **kwargs,
+    ):
+        super().__init__(WINDOW_TITLE, width=420, height=380, **kwargs)
         self._request_clicked_fn = request_clicked_fn
         self._browse_clicked_fn = browse_clicked_fn
         self._connect_clicked_fn = connect_clicked_fn
+        self._mode_changed_fn = mode_changed_fn
         # AUDIT FIX (2026-09-29): set_build_fn's callback doesn't necessarily
         # run synchronously inside __init__ (it can be deferred to the next
         # frame) -- extension.py used to set `.host` right after
         # construction, which hit `_host_field` before _build() had created
-        # it (AttributeError). Threading the initial value through the
+        # it (AttributeError). Threading the initial values through the
         # constructor instead means _build() itself, whenever it actually
-        # runs, has it available to seed the field with.
+        # runs, has them available to seed the widgets with.
+        self._mode = initial_mode
         self._initial_host = initial_host
+        self._updating_mode = False
         self.frame.set_build_fn(self._build)
 
     def _build(self):
         with self.frame:
             with ui.VStack(spacing=6, height=0):
-                # AUDIT FIX (2026-09-29): remote host used to be a hard-coded
-                # constant in remote_predict.py -- moved to the top of the
-                # window (was a "Settings" button that toggled a frame lower
-                # down) since it's the first thing to check/set up on a
-                # fresh machine, before there's even an STL to pick. Still
-                # collapsed by default so the common case (host already set,
-                # connection already verified) doesn't add visual clutter to
-                # every request -- click the header row to expand it.
-                #
-                # AUDIT FIX (2026-09-29): a real ui.CollapsableFrame was used
-                # here first, with the status folded into its .title string
-                # and .style reassigned on every status change. In the real
-                # Kit-CAE runtime the title text never actually picked up
-                # the color -- CollapsableFrame's header doesn't reliably
-                # re-style after construction. Replaced with a manually
-                # built header: a toggle-arrow button plus two separate
-                # Labels, so "Connect"/"Disconnect" is its own ui.Label with
-                # its own `style={"color": ...}`, which does reliably apply.
-                self._settings_expanded = False
+                # Header: "Server Settings" button toggles the panel below; the
+                # status sits next to it as its own Label because
+                # CollapsableFrame's header doesn't reliably re-style after
+                # construction (the status color never showed in Kit-CAE).
                 with ui.HStack(height=24):
-                    # AUDIT FIX (2026-10-01): the Unicode triangles (U+25B6/
-                    # U+25BC) rendered as "?" (missing-glyph box) in Kit-CAE's
-                    # UI font, which doesn't cover that block. Plain ASCII
-                    # renders everywhere.
-                    self._settings_toggle_button = ui.Button(
-                        ">", width=20, height=20,
-                        clicked_fn=self._toggle_settings,
-                        style={"Button": {"background_color": 0x0, "border_width": 0}},
-                    )
-                    ui.Label(f"{SETTINGS_FRAME_TITLE} - ", width=0)
+                    ui.Button("Server Settings", width=120, clicked_fn=self._toggle_settings)
+                    ui.Label("  - ", width=0)
                     self._settings_status_label = ui.Label("Checking...", style={"color": _COLOR_CHECKING})
 
                 self._settings_content_frame = ui.Frame(height=0, visible=False)
                 with self._settings_content_frame:
                     with ui.VStack(spacing=6, height=0):
-                        ui.Label("Server:")
                         with ui.HStack(height=24):
-                            self._host_field = ui.StringField()
-                            self._host_field.model.set_value(self._initial_host)
-                            ui.Button("Connect", width=70, clicked_fn=self._connect_clicked_fn)
+                            self._local_checkbox = ui.CheckBox(width=20)
+                            ui.Label("Local (WSL2)", width=110)
+                            self._remote_checkbox = ui.CheckBox(width=20)
+                            ui.Label("Remote")
+                        self._local_checkbox.model.add_value_changed_fn(
+                            lambda m: self._on_mode_toggled(MODE_LOCAL, m.get_value_as_bool())
+                        )
+                        self._remote_checkbox.model.add_value_changed_fn(
+                            lambda m: self._on_mode_toggled(MODE_REMOTE, m.get_value_as_bool())
+                        )
+
+                        self._remote_frame = ui.Frame(height=0)
+                        with self._remote_frame:
+                            with ui.VStack(spacing=6, height=0):
+                                ui.Label("Server IP:")
+                                self._host_field = ui.StringField(height=24)
+                                self._host_field.model.set_value(self._initial_host)
+
+                        ui.Button("Connect", height=24, clicked_fn=self._connect_clicked_fn)
 
                 ui.Spacer(height=8)
                 ui.Label("Input STL:")
@@ -94,6 +100,34 @@ class PredictWindow(ui.Window):
                 ui.Spacer(height=8)
                 self._status_label = ui.Label("Idle.", word_wrap=True)
 
+        self._apply_mode_to_widgets()
+
+    def _apply_mode_to_widgets(self) -> None:
+        self._updating_mode = True
+        try:
+            self._local_checkbox.model.set_value(self._mode == MODE_LOCAL)
+            self._remote_checkbox.model.set_value(self._mode == MODE_REMOTE)
+        finally:
+            self._updating_mode = False
+        self._remote_frame.visible = self._mode == MODE_REMOTE
+
+    def _on_mode_toggled(self, mode: str, checked: bool) -> None:
+        """Local and Remote behave as a pair: turning one on turns the other
+        off, and turning the active one off is ignored (one mode is always
+        selected)."""
+        if self._updating_mode:
+            return
+        if checked and mode != self._mode:
+            self._mode = mode
+            self._apply_mode_to_widgets()
+            self._mode_changed_fn(mode)
+        elif not checked and mode == self._mode:
+            self._apply_mode_to_widgets()
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
     @property
     def stl_path(self) -> str:
         return self._stl_path_field.model.get_value_as_string()
@@ -106,10 +140,6 @@ class PredictWindow(ui.Window):
     def host(self) -> str:
         return self._host_field.model.get_value_as_string()
 
-    @host.setter
-    def host(self, value: str) -> None:
-        self._host_field.model.set_value(value)
-
     @property
     def compute_faces(self) -> bool:
         return self._faces_checkbox.model.get_value_as_bool()
@@ -119,15 +149,11 @@ class PredictWindow(ui.Window):
         return self._streamlines_checkbox.model.get_value_as_bool()
 
     def _toggle_settings(self) -> None:
-        self._settings_expanded = not self._settings_expanded
-        self._settings_content_frame.visible = self._settings_expanded
-        self._settings_toggle_button.text = "v" if self._settings_expanded else ">"
+        self._settings_content_frame.visible = not self._settings_content_frame.visible
 
     def set_connection_status(self, connected: bool | None) -> None:
         """connected=True -> "Connect" (green), False -> "Disconnect"
-        (red), None -> "Checking..." (grey, while a check is in flight).
-        Only the status Label's own style is touched, so the toggle
-        button/expanded state next to it is untouched."""
+        (red), None -> "Checking..." (grey, while a check is in flight)."""
         if connected is None:
             text, color = "Checking...", _COLOR_CHECKING
         elif connected:
