@@ -19,6 +19,7 @@ Kit-CAE (Windows)             │            └ ~/domino-ahmedml/scripts/run_pr
 ```
 [Server Settings]  - Connect          ← 버튼을 누르면 아래 설정이 펼쳐짐. 상태는 초록/빨강
    [x] Local (WSL2)   [ ] Remote      ← 둘 중 하나만 선택됨
+   [Install Local Environment]        ← Local일 때만 보임. WSL 안에 추론 환경 자동 설치
    Server IP: [192.168.x.x]           ← Remote일 때만 보임
    [Connect]                          ← 지금 모드로 연결 확인
 Input STL: [..............] [Browse...]
@@ -29,7 +30,8 @@ Prediction imported (Local). Total 1m 52s (inference 1m 50s).   ← 완료 시 �
 
 - **Server Settings**: 누르면 설정이 펼쳐지고 다시 누르면 접힙니다. 옆에 연결 상태가 `Connect`(초록) / `Disconnect`(빨강)로 표시됩니다.
 - **Local / Remote**: 하나를 켜면 다른 하나는 자동으로 꺼집니다. 모드를 바꾸면 바로 연결을 다시 확인합니다.
-  - **Local**: 이 PC의 WSL2에서 추론합니다. Connect는 WSL이 켜지는지, GPU가 보이는지, 실행 스크립트와 모델이 설치돼 있는지까지 확인합니다.
+  - **Local**: 이 PC의 WSL2에서 추론합니다. Connect는 WSL → GPU → 추론 환경 순서로 확인하고, 실패하면 무엇이 없는지 상태 줄에 알려줍니다.
+  - **Install Local Environment**: WSL 안에 추론 환경(가상환경, PyTorch, cuML, physicsnemo 패치, 학습된 모델)을 설치합니다. 진행 단계가 상태 줄에 표시되고, 끝나면 자동으로 Connect를 확인합니다.
   - **Remote**: 입력한 서버 IP로 SSH 접속해 추론합니다.
 - **설정 저장**: 모드와 서버 IP는 `~/.domino_predict_settings.json`에 저장돼서, Kit-CAE를 다시 켜도 유지됩니다. 켜질 때 저장된 설정으로 자동 연결 확인을 합니다.
 - **소요시간**: 요청이 끝나면 전체 시간과 그중 추론에 걸린 시간을 상태 줄에 남깁니다.
@@ -38,15 +40,15 @@ Prediction imported (Local). Total 1m 52s (inference 1m 50s).   ← 완료 시 �
 ## 구성
 
 ```
-domino_predict/                  ← 익스텐션 폴더
+domino_predict/                      ← 익스텐션 폴더
 ├── config/extension.toml
-└── domino_predict/
-    ├── extension.py             ← 시작/종료, 요청 흐름, 소요시간, 결과를 Kit-CAE 시각화로 세팅
-    ├── predict_window.py        ← UI
-    ├── remote_predict.py        ← Local(WSL2) / Remote(SSH) 요청, 연결 확인, 설정 저장
-    └── cae_viz_helpers.py       ← Kit-CAE 연산자 완료 대기 등 보조 함수
-wsl_setup/
-└── setup_local_inference.sh     ← Local 모드용 WSL2 환경 자동 설치
+├── domino_predict/
+│   ├── extension.py                 ← 시작/종료, 요청 흐름, 설치, 소요시간, 결과를 Kit-CAE 시각화로 세팅
+│   ├── predict_window.py            ← UI
+│   ├── remote_predict.py            ← Local(WSL2) / Remote(SSH) 요청, 연결 확인, 설치 실행, 설정 저장
+│   └── cae_viz_helpers.py           ← Kit-CAE 연산자 완료 대기 등 보조 함수
+└── wsl_setup/
+    └── setup_local_inference.sh     ← Local 모드용 WSL2 환경 설치 (Install 버튼이 실행)
 ```
 
 ## 익스텐션 설치
@@ -58,19 +60,24 @@ wsl_setup/
 
 ## Local 모드 준비 (이 PC의 WSL2에서 추론)
 
-필요한 것: NVIDIA GPU(VRAM 8GB 이상 권장, 추론 1회 약 5GB 사용), Windows용 NVIDIA 드라이버, WSL2 Ubuntu.
+필요한 것: NVIDIA GPU(VRAM 8GB 이상 권장, 추론 1회 약 5GB 사용), Windows용 NVIDIA 드라이버.
 
-WSL2 터미널에서:
-```bash
-bash /mnt/c/<이 저장소 경로>/wsl_setup/setup_local_inference.sh
+**1. WSL2 설치 (직접, 처음 한 번)** — 관리자 권한과 재부팅이 필요해서 익스텐션이 대신하지 않습니다.
+```powershell
+# 관리자 PowerShell
+wsl --install -d Ubuntu-24.04
 ```
+재부팅 후 시작 메뉴에서 **Ubuntu**를 한 번 실행해 사용자 계정을 만듭니다.
 
-스크립트가 하는 일:
+**2. 추론 환경 설치 (버튼 하나)** — 익스텐션에서 **Server Settings → Local (WSL2) → Install Local Environment**.
+약 7GB를 받으므로 처음에는 10~20분 정도 걸립니다. sudo는 필요 없습니다. 끝나면 자동으로 Connect가 확인되고 `Connect`(초록)가 됩니다.
+
+> WSL 터미널에서 직접 실행해도 됩니다: `bash /mnt/c/<이 저장소 경로>/domino_predict/wsl_setup/setup_local_inference.sh`
+
+설치 스크립트가 하는 일:
 - 추론 전용 가상환경 `~/venvs/domino_infer` 생성 (torch 2.14.0+cu130, physicsnemo 2.2.2, cuML 26.8)
 - physicsnemo 2.2.2 버그 패치: `VTKFileReader`에 `read_file_attributes`가 없어서 STL을 읽지 못하는 문제
 - 추론 코드, 설정, 학습된 모델을 [domino-cfd-pipeline-guide](https://github.com/EOKYEONGBIN/domino-cfd-pipeline-guide), [domino-ahmedml-pipeline](https://github.com/EOKYEONGBIN/domino-ahmedml-pipeline)에서 받아 `~/domino-ahmedml`에 배치
-
-설치가 끝나면 익스텐션에서 **Server Settings → Local (WSL2) → Connect**를 누릅니다.
 
 > **cuML이 꼭 필요합니다.** 없으면 physicsnemo가 최근접 이웃 검색을 전체 거리 행렬을 만드는 PyTorch 구현으로 대체해서, 12GB급 GPU에서 `CUDA out of memory`가 납니다. 설치 스크립트가 함께 설치합니다.
 

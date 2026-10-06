@@ -18,6 +18,7 @@ class PredictWindow(ui.Window):
         browse_clicked_fn,
         connect_clicked_fn,
         mode_changed_fn,
+        install_clicked_fn,
         initial_mode: str = MODE_REMOTE,
         initial_host: str = "",
         **kwargs,
@@ -27,6 +28,7 @@ class PredictWindow(ui.Window):
         self._browse_clicked_fn = browse_clicked_fn
         self._connect_clicked_fn = connect_clicked_fn
         self._mode_changed_fn = mode_changed_fn
+        self._install_clicked_fn = install_clicked_fn
         # AUDIT FIX (2026-09-29): set_build_fn's callback doesn't necessarily
         # run synchronously inside __init__ (it can be deferred to the next
         # frame) -- extension.py used to set `.host` right after
@@ -65,6 +67,12 @@ class PredictWindow(ui.Window):
                         self._remote_checkbox.model.add_value_changed_fn(
                             lambda m: self._on_mode_toggled(MODE_REMOTE, m.get_value_as_bool())
                         )
+
+                        self._local_frame = ui.Frame(height=0)
+                        with self._local_frame:
+                            self._install_button = ui.Button(
+                                "Install Local Environment", height=24, clicked_fn=self._install_clicked_fn
+                            )
 
                         self._remote_frame = ui.Frame(height=0)
                         with self._remote_frame:
@@ -109,6 +117,7 @@ class PredictWindow(ui.Window):
             self._remote_checkbox.model.set_value(self._mode == MODE_REMOTE)
         finally:
             self._updating_mode = False
+        self._local_frame.visible = self._mode == MODE_LOCAL
         self._remote_frame.visible = self._mode == MODE_REMOTE
 
     def _on_mode_toggled(self, mode: str, checked: bool) -> None:
@@ -168,3 +177,8 @@ class PredictWindow(ui.Window):
 
     def set_busy(self, busy: bool) -> None:
         self._request_button.enabled = not busy
+
+    def set_install_busy(self, busy: bool) -> None:
+        self._install_button.enabled = not busy
+        self._install_button.text = "Installing..." if busy else "Install Local Environment"
+        self.set_busy(busy)

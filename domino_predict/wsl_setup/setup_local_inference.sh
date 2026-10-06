@@ -2,8 +2,12 @@
 # =============================================================================
 # DoMINO Prediction "Local" 모드용 WSL2 환경 설치
 # =============================================================================
-# Windows + NVIDIA GPU 노트북/PC의 WSL2(Ubuntu) 안에서 실행한다:
+# 보통은 익스텐션의 Server Settings > Local (WSL2) > [Install Local Environment]
+# 버튼이 이 스크립트를 WSL 안에서 실행한다. 직접 실행하려면 WSL2(Ubuntu) 터미널에서:
 #   bash setup_local_inference.sh
+#
+# 전제: WSL2 + Ubuntu 설치 완료 (관리자 PowerShell: wsl --install -d Ubuntu-24.04 → 재부팅
+# → Ubuntu 한 번 실행해 사용자 계정 생성), Windows용 NVIDIA 드라이버 설치. sudo는 필요 없다.
 #
 # 하는 일:
 #   1. 추론 전용 가상환경 ~/venvs/domino_infer 생성
@@ -21,10 +25,12 @@ D=~/domino-ahmedml
 CODE_RAW=https://raw.githubusercontent.com/EOKYEONGBIN/domino-cfd-pipeline-guide/master
 PIPE_RAW=https://raw.githubusercontent.com/EOKYEONGBIN/domino-ahmedml-pipeline/master
 
-echo "=== 0. GPU 확인 ==="
-nvidia-smi -L || { echo "WSL 안에서 NVIDIA GPU가 보이지 않습니다. Windows용 NVIDIA 드라이버를 먼저 설치하세요."; exit 1; }
+# 진행 메시지(=== ...)는 Kit-CAE 익스텐션 상태 줄에 그대로 표시되므로 영어로 쓴다
+# (Kit UI 폰트가 한글을 표시하지 못할 수 있음).
+echo "=== [1/7] Checking GPU in WSL ==="
+nvidia-smi -L || { echo "ERROR: NVIDIA GPU is not visible inside WSL. Install/update the Windows NVIDIA driver first."; exit 1; }
 
-echo "=== 1. 가상환경 ($VENV) ==="
+echo "=== [2/7] Creating Python environment ($VENV) ==="
 if [ ! -x "$VENV/bin/python" ]; then
     mkdir -p "$(dirname "$VENV")"
     # python3-venv 패키지(sudo 필요)가 없어도 되도록 pip을 직접 설치한다.
@@ -33,14 +39,20 @@ if [ ! -x "$VENV/bin/python" ]; then
     "$VENV/bin/python" /tmp/get-pip.py -q
 fi
 source "$VENV/bin/activate"
+
+echo "=== [3/7] Installing PyTorch (about 3GB, several minutes) ==="
 pip install -q torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cu130
+
+echo "=== [4/7] Installing PhysicsNeMo and dependencies ==="
 pip install -q nvidia-physicsnemo==2.2.2 pyvista==0.49.0 vtk==9.7.0 torchinfo==1.8.0 \
     nvidia-ml-py scipy==1.18.1 cupy-cuda13x==14.2.0 warp-lang==1.17.0
+
+echo "=== [5/7] Installing cuML (about 2GB, several minutes) ==="
 # cuML이 없으면 physicsnemo의 kNN이 전체 거리 행렬을 만드는 PyTorch 구현으로 대체돼서
 # 12GB급 GPU에서 메모리 부족(CUDA out of memory)이 난다.
 pip install -q cuml-cu13==26.8.0 --extra-index-url=https://pypi.nvidia.com
 
-echo "=== 2. physicsnemo 2.2.2 패치 ==="
+echo "=== [6/7] Patching PhysicsNeMo 2.2.2 and downloading model ==="
 python - <<'PY'
 import pathlib, physicsnemo.datapipes.cae.cae_dataset as m
 p = pathlib.Path(m.__file__)
@@ -55,17 +67,17 @@ method = (
     "            return {}\n\n"
     "        def read_file(self, filename: pathlib.Path)"
 )
-if "Added by setup_local_inference.sh" in src or "VTKFileReader never actually defined" in src:
-    print("이미 패치됨")
+markers = ("Added by setup_local_inference.sh", "Added by patch_physicsnemo.py", "VTKFileReader never actually defined")
+if any(m in src for m in markers):
+    print("Already patched:", p)
 elif anchor in src:
     p.with_suffix(".py.orig").write_text(src)
     p.write_text(src.replace(anchor, method, 1))
-    print("패치 적용:", p)
+    print("Patched:", p)
 else:
-    raise SystemExit("패치 위치를 찾지 못했습니다 (physicsnemo 버전이 2.2.2가 맞는지 확인하세요).")
+    raise SystemExit("ERROR: patch anchor not found -- is physicsnemo 2.2.2 installed?")
 PY
 
-echo "=== 3. 추론 코드 / 설정 / 모델 ==="
 mkdir -p $D/inference_src $D/configs $D/model $D/scripts $D/requests
 for f in predict_on_stl.py utils.py loss.py; do
     wget -q -O $D/inference_src/$f $CODE_RAW/$f
@@ -83,7 +95,7 @@ sed -i -e 's/\r$//' \
        $D/scripts/run_prediction.sh
 chmod +x $D/scripts/run_prediction.sh
 
-echo "=== 4. 확인 ==="
+echo "=== [7/7] Verifying installation ==="
 python - <<'PY'
 import torch, physicsnemo
 from physicsnemo.nn.functional.neighbors.knn.knn import KNN
@@ -94,4 +106,4 @@ assert torch.cuda.is_available() and impls["cuml"].available
 PY
 grep -q 'domino_infer' $D/scripts/run_prediction.sh && grep -q 'inference_src' $D/scripts/run_prediction.sh
 ls -la $D/model
-echo "설치 완료. Kit-CAE의 DoMINO Prediction에서 Server Settings > Local (WSL2) > Connect 를 누르세요."
+echo "=== Done: local inference environment is ready ==="

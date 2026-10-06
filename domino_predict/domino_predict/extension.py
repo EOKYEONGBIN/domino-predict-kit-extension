@@ -33,6 +33,7 @@ class DominoPredictExtension(omni.ext.IExt):
             browse_clicked_fn=self._on_browse_clicked,
             connect_clicked_fn=self._on_connect_clicked,
             mode_changed_fn=self._on_mode_changed,
+            install_clicked_fn=self._on_install_clicked,
             initial_mode=settings["mode"],
             initial_host=settings["ssh_host"],
             visible=True,
@@ -74,6 +75,28 @@ class DominoPredictExtension(omni.ext.IExt):
         # The old status belonged to the other mode -- re-check right away.
         asyncio.ensure_future(self._do_connect())
 
+    def _on_install_clicked(self):
+        asyncio.ensure_future(self._do_install())
+
+    async def _do_install(self):
+        self._window.set_install_busy(True)
+        self._window.set_connection_status(None)
+        start = time.monotonic()
+        try:
+            ok, message = await remote_predict.install_local_environment(progress_cb=self._window.set_status)
+        except Exception as e:
+            ok, message = False, f"Install failed: {e}"
+        finally:
+            self._window.set_install_busy(False)
+        elapsed = _format_duration(time.monotonic() - start)
+        if not ok:
+            carb.log_error(f"[domino_predict] {message}")
+            self._window.set_connection_status(False)
+            self._window.set_status(f"{message} ({elapsed})")
+            return
+        self._window.set_status(f"{message} ({elapsed})")
+        await self._do_connect()
+
     async def _do_connect(self, mode: str | None = None, host: str | None = None):
         # Called two ways: from the UI (Connect button / mode toggle, mode and
         # host read from the widgets -- the UI is built by then, since the
@@ -98,6 +121,10 @@ class DominoPredictExtension(omni.ext.IExt):
         self._window.set_connection_status(ok)
         if not ok:
             carb.log_warn(f"[domino_predict] {message}")
+        # Shown in the status line so the user knows what to fix (e.g. install
+        # WSL, or click Install Local Environment) -- and so a stale failure
+        # message is replaced once the connection works.
+        self._window.set_status(message)
 
     async def _do_request(self):
         stl_path = self._window.stl_path.strip()

@@ -15,6 +15,7 @@ here.
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import os
 import shlex
@@ -23,6 +24,16 @@ import uuid
 
 MODE_LOCAL = "local"
 MODE_REMOTE = "remote"
+
+# Shipped inside the extension folder: <extension>/wsl_setup/setup_local_inference.sh
+SETUP_SCRIPT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wsl_setup", "setup_local_inference.sh"
+)
+LOCAL_VENV_PYTHON = "~/venvs/domino_infer/bin/python"
+WSL_INSTALL_HINT = (
+    "WSL2 is not available. In an admin PowerShell run 'wsl --install -d Ubuntu-24.04', "
+    "reboot, open Ubuntu once to create a user, then click Connect again."
+)
 
 SSH_USER = "YOUR_USER"  # SSH account on the inference server
 SSH_KEY_PATH = os.path.expanduser("~/.ssh/id_ed25519")
@@ -142,31 +153,80 @@ def _backend(mode: str):
     return _LocalBackend() if mode == MODE_LOCAL else _RemoteBackend()
 
 
+async def _local_check() -> tuple[bool, str]:
+    """Checks the local WSL2 setup one layer at a time, so the message says
+    which layer is missing (WSL itself / GPU driver / our environment)."""
+    try:
+        await _run(_wsl_cmd("echo ok"))
+    except (PredictionError, OSError):
+        return False, WSL_INSTALL_HINT
+    try:
+        await _run(_wsl_cmd("nvidia-smi -L"))
+    except PredictionError:
+        return False, "WSL2 cannot see the NVIDIA GPU. Install or update the Windows NVIDIA driver."
+    try:
+        await _run(_wsl_cmd(
+            f"test -x {LOCAL_VENV_PYTHON} && test -x {REMOTE_RUN_SCRIPT} && ls {REMOTE_MODEL_DIR}/*.mdlus"
+        ))
+    except PredictionError:
+        return False, "Local inference environment is not installed. Click 'Install Local Environment'."
+    return True, "Connected to local WSL2."
+
+
 async def test_connection(mode: str, host: str = "") -> tuple[bool, str]:
     """Remote: a bare `ssh ... echo ok` with a short timeout, so a wrong or
-    unreachable IP fails fast. Local: checks that WSL2 starts, sees the GPU,
-    and has the run script + a model installed -- i.e. that a request would
-    actually work, not just that wsl.exe exists."""
+    unreachable IP fails fast. Local: checks that a request would actually
+    work (WSL2, GPU, installed environment), not just that wsl.exe exists."""
     if mode == MODE_LOCAL:
-        check = (
-            f"test -x {REMOTE_RUN_SCRIPT} && ls {REMOTE_MODEL_DIR}/*.mdlus >/dev/null "
-            "&& nvidia-smi -L >/dev/null && echo ok"
-        )
-        cmd = _wsl_cmd(check)
-        target = "local WSL2"
-    else:
-        cmd = [
-            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
-            "-i", SSH_KEY_PATH, f"{SSH_USER}@{host}", "echo ok",
-        ]
-        target = host
+        return await _local_check()
+    cmd = [
+        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
+        "-i", SSH_KEY_PATH, f"{SSH_USER}@{host}", "echo ok",
+    ]
     try:
         output = await _run(cmd)
-    except (PredictionError, OSError) as e:
-        return False, f"Connection failed: {e}"
+    except (PredictionError, OSError):
+        return False, f"Cannot connect to {host} over SSH. Check the IP, the network, and the SSH key."
     if "ok" not in output:
-        return False, f"Unexpected response from {target}: {output.strip()!r}"
-    return True, f"Connected to {target}."
+        return False, f"Unexpected response from {host}: {output.strip()!r}"
+    return True, f"Connected to {host}."
+
+
+async def install_local_environment(progress_cb=None) -> tuple[bool, str]:
+    """Runs wsl_setup/setup_local_inference.sh inside WSL2 (no sudo needed)
+    and forwards its "=== ... ===" step lines to progress_cb. Takes roughly
+    10-20 minutes on a fresh machine (PyTorch + cuML downloads, ~7GB)."""
+
+    def report(msg: str):
+        if progress_cb is not None:
+            progress_cb(msg)
+
+    try:
+        await _run(_wsl_cmd("echo ok"))
+    except (PredictionError, OSError):
+        return False, WSL_INSTALL_HINT
+    if not os.path.isfile(SETUP_SCRIPT):
+        return False, f"Setup script not found: {SETUP_SCRIPT}"
+
+    # Strip CRLF first: a Windows checkout/zip of the extension may carry
+    # Windows line endings, which bash can't run.
+    script = shlex.quote(_to_wsl_path(SETUP_SCRIPT))
+    proc = await asyncio.create_subprocess_exec(
+        *_wsl_cmd(f"tr -d '\\r' < {script} > /tmp/domino_setup.sh && bash /tmp/domino_setup.sh"),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    tail = collections.deque(maxlen=15)
+    async for raw in proc.stdout:
+        line = raw.decode(errors="replace").strip()
+        if not line:
+            continue
+        tail.append(line)
+        if line.startswith("==="):
+            report(f"Installing: {line.strip('= ').strip()}")
+    if await proc.wait() != 0:
+        return False, "Install failed:\n" + "\n".join(tail)
+    return True, "Local environment installed."
 
 
 async def request_prediction(
