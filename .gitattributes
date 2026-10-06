@@ -1,3 +1,1 @@
 *.sh text eol=lf
-*.mdlus binary
-*.pkl binary

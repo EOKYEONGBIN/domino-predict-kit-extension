@@ -49,7 +49,6 @@ domino_predict/                      ← 익스텐션 폴더
 │   ├── legend.py                    ← 뷰포트 왼쪽 아래 색상 범례
 │   ├── remote_predict.py            ← Local(WSL2) / Remote(SSH) 요청, 연결 확인, 설치 실행, 설정 저장
 │   └── cae_viz_helpers.py           ← Kit-CAE 연산자 완료 대기 등 보조 함수
-├── model/                           ← 학습된 모델 (DoMINO.0.220.mdlus 약 82MB + scaling_factors.pkl, CC BY-SA 4.0)
 └── wsl_setup/
     └── setup_local_inference.sh     ← Local 모드용 WSL2 환경 설치 (Install 버튼이 실행)
 ```
@@ -80,7 +79,7 @@ wsl --install -d Ubuntu-24.04
 설치 스크립트가 하는 일:
 - 추론 전용 가상환경 `~/venvs/domino_infer` 생성 (torch 2.14.0+cu130, physicsnemo 2.2.2, cuML 26.8)
 - physicsnemo 2.2.2 버그 패치: `VTKFileReader`에 `read_file_attributes`가 없어서 STL을 읽지 못하는 문제
-- 추론 코드와 설정을 [domino-cfd-pipeline-guide](https://github.com/EOKYEONGBIN/domino-cfd-pipeline-guide), [domino-ahmedml-pipeline](https://github.com/EOKYEONGBIN/domino-ahmedml-pipeline)에서 받고, 학습된 모델은 이 저장소의 `domino_predict/model/`에서 복사해 `~/domino-ahmedml`에 배치
+- 추론 코드, 설정, 학습된 모델을 [domino-cfd-pipeline-guide](https://github.com/EOKYEONGBIN/domino-cfd-pipeline-guide), [domino-ahmedml-pipeline](https://github.com/EOKYEONGBIN/domino-ahmedml-pipeline)에서 받아 `~/domino-ahmedml`에 배치
 
 > **cuML이 꼭 필요합니다.** 없으면 physicsnemo가 최근접 이웃 검색을 전체 거리 행렬을 만드는 PyTorch 구현으로 대체해서, 12GB급 GPU에서 `CUDA out of memory`가 납니다. 설치 스크립트가 함께 설치합니다.
 
@@ -101,4 +100,4 @@ wsl --install -d Ubuntu-24.04
 
 ## 라이선스
 
-코드는 Apache License 2.0. 단, `domino_predict/model/`의 학습된 모델은 학습 데이터(AhmedML)를 따라 CC BY-SA 4.0입니다 ([model/README.md](domino_predict/model/README.md) 참고).
+Apache License 2.0. 단, 이 익스텐션으로 불러오는 DoMINO 모델은 학습 데이터(AhmedML)를 따라 CC BY-SA 4.0입니다.

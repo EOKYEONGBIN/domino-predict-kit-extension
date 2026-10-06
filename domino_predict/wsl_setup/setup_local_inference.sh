@@ -13,16 +13,13 @@
 #   1. 추론 전용 가상환경 ~/venvs/domino_infer 생성
 #      (A6000 서버와 같은 버전: torch 2.14.0+cu130, physicsnemo 2.2.2, cuML 26.8)
 #   2. physicsnemo 2.2.2 버그 패치 (VTKFileReader에 read_file_attributes 없음)
-#   3. ~/domino-ahmedml 에 추론 코드, 설정, 실행 스크립트를 GitHub에서 받아 배치하고,
-#      학습된 모델은 이 익스텐션의 model/ 폴더에서 복사
+#   3. ~/domino-ahmedml 에 추론 코드, 설정, 학습된 모델, 실행 스크립트를 GitHub에서 받아 배치
 #   4. 설치 확인
 #
 # 여러 번 실행해도 안전하다 (이미 있는 것은 건너뛰거나 같은 내용으로 덮어씀).
 # =============================================================================
 set -euo pipefail
 
-# 학습된 모델은 익스텐션 저장소에 함께 들어 있다 (domino_predict/model/)
-MODEL_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../model" && pwd)"
 VENV=~/venvs/domino_infer
 D=~/domino-ahmedml
 CODE_RAW=https://raw.githubusercontent.com/EOKYEONGBIN/domino-cfd-pipeline-guide/master
@@ -55,7 +52,7 @@ echo "=== [5/7] Installing cuML (about 2GB, several minutes) ==="
 # 12GB급 GPU에서 메모리 부족(CUDA out of memory)이 난다.
 pip install -q cuml-cu13==26.8.0 --extra-index-url=https://pypi.nvidia.com
 
-echo "=== [6/7] Patching PhysicsNeMo 2.2.2 and copying model ==="
+echo "=== [6/7] Patching PhysicsNeMo 2.2.2 and downloading model ==="
 python - <<'PY'
 import pathlib, physicsnemo.datapipes.cae.cae_dataset as m
 p = pathlib.Path(m.__file__)
@@ -87,7 +84,8 @@ for f in predict_on_stl.py utils.py loss.py; do
 done
 wget -q -O $D/configs/real_train_500.yaml $PIPE_RAW/configs/real_train_500.yaml
 sed -i "s|/home/YOUR_USER/|$HOME/|g" $D/configs/real_train_500.yaml
-cp "$MODEL_SRC/DoMINO.0.220.mdlus" "$MODEL_SRC/scaling_factors.pkl" $D/model/
+wget -q -O $D/model/DoMINO.0.220.mdlus $PIPE_RAW/model/DoMINO.0.220.mdlus
+wget -q -O $D/model/scaling_factors.pkl $PIPE_RAW/model/scaling_factors.pkl
 # 서버용 실행 스크립트를 받아 이 환경에 맞게 두 줄만 바꾼다:
 # 가상환경 → domino_infer, 추론 코드 위치 → ~/domino-ahmedml/inference_src
 wget -q -O $D/scripts/run_prediction.sh $CODE_RAW/scripts/run_prediction.sh
