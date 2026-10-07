@@ -29,6 +29,17 @@ from .predict_window import PredictWindow
 PMEAN_RANGE_MIN = -1.0
 PMEAN_RANGE_MAX = 0.52
 
+# Legend bars for the Faces fields a DoMINO prediction contains (yPlusMean is
+# CFD-only). Same fixed ranges recommended for comparing cases with Rescale
+# Mode "disable": Cp is exactly 2 x pMean; wall shear stress is colored by
+# magnitude (Field Selection Mode "vector_magnitude"), 0.007 covers 99% of
+# the surface in 95% of the 500 cases.
+LEGEND_FIELDS = [
+    ("pMean", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
+    ("static(p)_coeffMean  (Cp = 2 x pMean)", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
+    ("wallShearStressMean  (magnitude)", 0.0, 0.007),
+]
+
 
 def _format_duration(seconds: float) -> str:
     seconds = int(round(seconds))
@@ -39,7 +50,7 @@ def _format_duration(seconds: float) -> str:
 class DominoPredictExtension(omni.ext.IExt):
     def on_startup(self, ext_id):
         self._request_counter = 0
-        self._legend = ColorLegend("pMean  (Cp = 2 x pMean)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX)
+        self._legend = ColorLegend(LEGEND_FIELDS)
         settings = remote_predict.load_settings()
         self._window = PredictWindow(
             request_clicked_fn=self._on_request_clicked,
@@ -47,10 +58,13 @@ class DominoPredictExtension(omni.ext.IExt):
             connect_clicked_fn=self._on_connect_clicked,
             mode_changed_fn=self._on_mode_changed,
             install_clicked_fn=self._on_install_clicked,
+            legend_toggled_fn=self._on_legend_toggled,
             initial_mode=settings["mode"],
             initial_host=settings["ssh_host"],
             visible=True,
         )
+        # The "Legend UI" toggle starts on, so show the legend right away.
+        asyncio.ensure_future(self._legend.show_when_ready())
         # Check the remembered mode/server as soon as the extension comes
         # up, instead of leaving the user to guess whether it's reachable
         # until they explicitly hit Connect.
@@ -64,6 +78,12 @@ class DominoPredictExtension(omni.ext.IExt):
             self._window.visible = False
             self._window.destroy()
             self._window = None
+
+    def _on_legend_toggled(self, on: bool):
+        if on:
+            asyncio.ensure_future(self._legend.show_when_ready())
+        else:
+            self._legend.hide()
 
     def _on_browse_clicked(self):
         import omni.kit.window.filepicker as filepicker
@@ -273,7 +293,6 @@ class DominoPredictExtension(omni.ext.IExt):
             target_attr = stage.GetAttributeAtPath(target_path)
             if target_attr:
                 target_attr.Set(True)
-        self._legend.show()
 
         # Same pattern as CAE_Examples/AhmedML/run_1/open_ahmed_cae_scene.py's
         # BoundingBox_boundary_1.
