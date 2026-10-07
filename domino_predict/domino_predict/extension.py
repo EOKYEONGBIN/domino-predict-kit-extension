@@ -36,8 +36,8 @@ PMEAN_RANGE_MAX = 0.52
 # the surface in 95% of the 500 cases.
 LEGEND_FIELDS = [
     ("pMean", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
-    ("static(p)_coeffMean  (Cp = 2 x pMean)", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
-    ("wallShearStressMean  (magnitude)", 0.0, 0.007),
+    ("static_p__coeffMean", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
+    ("wallShearStressMean (mag)", 0.0, 0.007),
 ]
 
 

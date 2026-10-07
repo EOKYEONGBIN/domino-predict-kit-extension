@@ -1,9 +1,9 @@
 """
 Color legend for the prediction Faces, drawn as an overlay in the bottom-left
 of the active viewport so it shows up next to the model (and in screenshots).
-One color bar per field, stacked. Uses the same colormap image Kit-CAE's
-Faces material samples (omni.cae.viz's cae/colormaps/gist_rainbow.png), so
-the bars match the surface colors exactly.
+One shared color bar with a row of tick values per field underneath. Uses
+the same colormap image Kit-CAE's Faces material samples (omni.cae.viz's
+cae/colormaps/gist_rainbow.png), so the bar matches the surface colors exactly.
 """
 
 import os
@@ -13,8 +13,10 @@ import omni.ui as ui
 
 _FRAME_NAME = "domino_predict_legend"
 _N_TICKS = 5
-_BAR_WIDTH = 260
+_BAR_WIDTH = 300
 _BAR_HEIGHT = 14
+_NAME_WIDTH = 200
+_PAD = 10
 
 
 def _colormap_path() -> str | None:
@@ -63,41 +65,42 @@ class ColorLegend:
         image_path = _colormap_path()
         text_style = {"color": 0xFFFFFFFF, "font_size": 14}
 
+        # One shared color bar (every field uses the same colormap), then one
+        # row per field: name on the left, its tick values under the bar.
         with self._frame:
             with ui.VStack():
                 ui.Spacer()
                 with ui.HStack(height=0):
                     ui.Spacer(width=16)
-                    with ui.ZStack(width=_BAR_WIDTH + 16, height=0):
+                    with ui.ZStack(width=_PAD + _NAME_WIDTH + _BAR_WIDTH + _PAD, height=0):
                         ui.Rectangle(style={"background_color": 0xA0000000, "border_radius": 4})
-                        with ui.VStack(height=0, spacing=4):
+                        with ui.VStack(height=0, spacing=6):
+                            ui.Spacer(height=2)
+                            with ui.HStack(height=_BAR_HEIGHT):
+                                ui.Spacer(width=_PAD + _NAME_WIDTH)
+                                if image_path:
+                                    ui.Image(
+                                        image_path,
+                                        width=_BAR_WIDTH,
+                                        height=_BAR_HEIGHT,
+                                        fill_policy=ui.FillPolicy.STRETCH,
+                                    )
+                                else:
+                                    ui.Label("(colormap image not found)", style=text_style)
                             for title, vmin, vmax in self._fields:
-                                ui.Spacer(height=4)
                                 with ui.HStack(height=0):
-                                    ui.Spacer(width=8)
-                                    ui.Label(title, style=text_style, height=0)
-                                with ui.HStack(height=_BAR_HEIGHT):
-                                    ui.Spacer(width=8)
-                                    if image_path:
-                                        ui.Image(
-                                            image_path,
-                                            width=_BAR_WIDTH,
-                                            height=_BAR_HEIGHT,
-                                            fill_policy=ui.FillPolicy.STRETCH,
-                                        )
-                                    else:
-                                        ui.Label("(colormap image not found)", style=text_style)
-                                with ui.HStack(height=0):
-                                    ui.Spacer(width=8)
-                                    for i in range(_N_TICKS):
-                                        value = vmin + (vmax - vmin) * i / (_N_TICKS - 1)
-                                        if i:
-                                            ui.Spacer()
-                                        ui.Label(_format_tick(value, vmin, vmax), width=0, style=text_style)
-                                    ui.Spacer(width=8)
-                            ui.Spacer(height=4)
+                                    ui.Spacer(width=_PAD)
+                                    ui.Label(title, width=_NAME_WIDTH, style=text_style)
+                                    with ui.HStack(width=_BAR_WIDTH):
+                                        for i in range(_N_TICKS):
+                                            value = vmin + (vmax - vmin) * i / (_N_TICKS - 1)
+                                            if i:
+                                                ui.Spacer()
+                                            ui.Label(_format_tick(value, vmin, vmax), width=0, style=text_style)
+                            ui.Spacer(height=2)
                     ui.Spacer()
-                ui.Spacer(height=16)
+                # Keep clear of the viewport's axis gizmo in the bottom-left.
+                ui.Spacer(height=56)
         return True
 
     def hide(self) -> None:

@@ -47,7 +47,7 @@ domino_predict/                      ← 익스텐션 폴더
 ├── domino_predict/
 │   ├── extension.py                 ← 시작/종료, 요청 흐름, 설치, 소요시간, 결과를 Kit-CAE 시각화로 세팅
 │   ├── predict_window.py            ← UI
-│   ├── legend.py                    ← 뷰포트 왼쪽 아래 색상 범례 (필드 3개)
+│   ├── legend.py                    ← 뷰포트 왼쪽 아래 색상 범례 (컬러바 1개 + 필드 3줄)
 │   ├── remote_predict.py            ← Local(WSL2) / Remote(SSH) 요청, 연결 확인, 설치 실행, 설정 저장
 │   └── cae_viz_helpers.py           ← Kit-CAE 연산자 완료 대기 등 보조 함수
 └── wsl_setup/
