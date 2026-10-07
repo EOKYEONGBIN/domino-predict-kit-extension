@@ -26,6 +26,7 @@ Kit-CAE (Windows)             │            └ ~/domino-ahmedml/scripts/run_pr
 Input STL: [..............] [Browse...]
 Visualize: [x] Faces  [x] Streamlines
 [Request Prediction]
+[Save Boundary (.vtp)] [Save Volume (.vti)]   ← 최근 결과를 원하는 위치에 저장
 Prediction imported (Local). Total 1m 52s (inference 1m 50s).   ← 완료 시 소요시간
 ```
 
@@ -35,6 +36,7 @@ Prediction imported (Local). Total 1m 52s (inference 1m 50s).   ← 완료 시 �
   - **Install Local Environment**: WSL 안에 추론 환경(가상환경, PyTorch, cuML, physicsnemo 패치, 학습된 모델)을 설치합니다. 진행 단계가 상태 줄에 표시되고, 끝나면 자동으로 Connect를 확인합니다.
   - **Remote**: 입력한 서버 IP로 SSH 접속해 추론합니다.
 - **설정 저장**: 모드와 서버 IP는 `~/.domino_predict_settings.json`에 저장돼서, Kit-CAE를 다시 켜도 유지됩니다. 켜질 때 저장된 설정으로 자동 연결 확인을 합니다.
+- **결과 저장**: Save Boundary (.vtp) / Save Volume (.vti) 버튼으로 가장 최근 요청의 결과를 원하는 폴더에 따로 저장합니다. 저장하면 장면의 데이터셋(`DominoPrediction_N`, `DominoVolumePrediction_N`)이 저장한 파일을 보도록 바뀌어서, 장면을 Save As 한 뒤 임시 폴더가 지워져도 다시 열면 결과가 그대로 나옵니다. 받아 온 결과는 기본으로 Windows 임시 폴더(`%TEMP%\domino_predict_<요청ID>_...`)에 있습니다.
 - **소요시간**: 요청이 끝나면 전체 시간과 그중 추론에 걸린 시간을 상태 줄에 남깁니다.
 - **시각화**: Faces(표면 압력 / 벽전단응력), Streamlines(체적 속도장 유선)를 골라서 요청할 수 있고, 받은 결과로 Kit-CAE 연산자를 자동으로 만듭니다.
 - **고정 색상 범위 + 범례**: 예측 Faces의 pMean 색상 범위를 항상 **-1.00 ~ 0.52**로 고정합니다(자동 재조정 끔). 그래서 어떤 STL을 넣어도 같은 압력은 같은 색입니다. 범위는 AhmedML CFD 500개 전체에서 정했습니다. 뷰포트 오른쪽 아래에 DoMINO가 내는 Faces 필드 3개의 범례가 나옵니다: pMean (-1.00 ~ 0.52), Cp = 2 × pMean (-2.00 ~ 1.04), 벽 전단응력 크기 (0 ~ 0.007, Field Selection Mode를 `vector_magnitude`로). 다른 필드로 바꿔 볼 때는 Rescale Mode `disable` 상태에서 Shader의 Scalar Domain을 범례 값으로 맞추면 됩니다. 범례는 익스텐션이 켜지면 바로 표시되고, 창의 **Legend UI** 토글로 켜고 끌 수 있습니다(기본 켜짐). 범위를 바꾸려면 `extension.py`의 `PMEAN_RANGE_MIN/MAX`, `LEGEND_FIELDS`를 고치면 됩니다.

@@ -1,10 +1,12 @@
 import asyncio
 import os
+import shutil
 import tempfile
 import time
 
 import carb
 import carb.eventdispatcher
+import omni.client.utils as clientutils
 import omni.ext
 import omni.kit.asset_converter as asset_converter
 import omni.usd
@@ -51,6 +53,8 @@ class DominoPredictExtension(omni.ext.IExt):
     def on_startup(self, ext_id):
         self._request_counter = 0
         self._legend = ColorLegend(LEGEND_FIELDS)
+        # Latest successful request: kind -> (downloaded file, dataset prim path)
+        self._latest: dict[str, tuple[str, str]] = {}
         settings = remote_predict.load_settings()
         self._window = PredictWindow(
             request_clicked_fn=self._on_request_clicked,
@@ -59,6 +63,7 @@ class DominoPredictExtension(omni.ext.IExt):
             mode_changed_fn=self._on_mode_changed,
             install_clicked_fn=self._on_install_clicked,
             legend_toggled_fn=self._on_legend_toggled,
+            save_clicked_fn=self._on_save_clicked,
             initial_mode=settings["mode"],
             initial_host=settings["ssh_host"],
             visible=True,
@@ -179,6 +184,7 @@ class DominoPredictExtension(omni.ext.IExt):
 
         mode = self._window.mode
         self._window.set_busy(True)
+        self._window.set_save_enabled(False, False)
         start = time.monotonic()
         try:
             self._window.set_status("Loading input shape...")
@@ -208,6 +214,11 @@ class DominoPredictExtension(omni.ext.IExt):
                 UsdGeom.Imageable(shape_prim).MakeInvisible()
             if local_volume_path is not None:
                 await self._import_volume_streamlines(local_volume_path, shape_path, n)
+            self._latest = {}
+            if local_surface_path is not None:
+                self._latest["boundary"] = (local_surface_path, f"/World/DominoPrediction_{n}")
+            if local_volume_path is not None:
+                self._latest["volume"] = (local_volume_path, f"/World/DominoVolumePrediction_{n}")
             where = "Local" if mode == remote_predict.MODE_LOCAL else "Remote"
             self._window.set_status(
                 f"Prediction imported ({where}). Total {_format_duration(time.monotonic() - start)} "
@@ -218,6 +229,55 @@ class DominoPredictExtension(omni.ext.IExt):
             self._window.set_status(f"Error after {_format_duration(time.monotonic() - start)}: {e}")
         finally:
             self._window.set_busy(False)
+            # A failed request keeps the previous result saveable.
+            self._window.set_save_enabled("boundary" in self._latest, "volume" in self._latest)
+
+    def _on_save_clicked(self, kind: str):
+        """Copies the latest request's downloaded result (kind = "boundary"
+        or "volume") to a user-chosen file, then points that dataset prim's
+        payload at the copy -- the temp download folder can be cleaned up,
+        and a scene saved afterwards should reopen with its results."""
+        import omni.kit.window.filepicker as filepicker
+
+        if kind not in self._latest:
+            self._window.set_status(f"Error: no {kind} result to save yet.")
+            return
+        src, prim_path = self._latest[kind]
+        ext, label = (".vtp", "VTK PolyData") if kind == "boundary" else (".vti", "VTK ImageData")
+
+        def on_apply(filename, dirname):
+            dialog.hide()
+            if not filename:
+                self._window.set_status("Error: enter a file name to save.")
+                return
+            name = filename if filename.lower().endswith(ext) else filename + ext
+            dst = os.path.realpath(os.path.join(dirname, name))
+            try:
+                if os.path.normcase(dst) != os.path.normcase(os.path.realpath(src)):
+                    shutil.copy2(src, dst)
+                prim = omni.usd.get_context().get_stage().GetPrimAtPath(prim_path)
+                if prim and prim.IsValid():
+                    # Same way omni.cae.usd_plugins_importers records it.
+                    payloads = prim.GetPayloads()
+                    payloads.ClearPayloads()
+                    payloads.AddPayload(clientutils.make_file_url_if_possible(clientutils.normalize_url(dst)))
+                    prim.Load()
+                self._latest[kind] = (dst, prim_path)
+                self._window.set_status(f"Saved {kind}: {dst}")
+            except Exception as e:
+                carb.log_error(f"[domino_predict] Save {kind} failed: {e}")
+                self._window.set_status(f"Error saving {kind}: {e}")
+
+        base = "prediction_boundary" if kind == "boundary" else "prediction_volume"
+        dialog = filepicker.FilePickerDialog(
+            f"Save {'Boundary' if kind == 'boundary' else 'Volume'} Prediction",
+            allow_multi_selection=False,
+            apply_button_label="Save",
+            click_apply_handler=lambda filename, dirname: on_apply(filename, dirname),
+            file_extension_options=[(f"*{ext}", f"{label} (*{ext})")],
+            current_filename=base,
+        )
+        dialog.show()
 
     async def _import_input_shape(self, stl_path: str, n: int) -> str:
         ctx = omni.usd.get_context()

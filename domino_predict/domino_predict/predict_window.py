@@ -20,17 +20,19 @@ class PredictWindow(ui.Window):
         mode_changed_fn,
         install_clicked_fn,
         legend_toggled_fn,
+        save_clicked_fn,
         initial_mode: str = MODE_REMOTE,
         initial_host: str = "",
         **kwargs,
     ):
-        super().__init__(WINDOW_TITLE, width=420, height=410, **kwargs)
+        super().__init__(WINDOW_TITLE, width=420, height=450, **kwargs)
         self._request_clicked_fn = request_clicked_fn
         self._browse_clicked_fn = browse_clicked_fn
         self._connect_clicked_fn = connect_clicked_fn
         self._mode_changed_fn = mode_changed_fn
         self._install_clicked_fn = install_clicked_fn
         self._legend_toggled_fn = legend_toggled_fn
+        self._save_clicked_fn = save_clicked_fn
         # AUDIT FIX (2026-09-29): set_build_fn's callback doesn't necessarily
         # run synchronously inside __init__ (it can be deferred to the next
         # frame) -- extension.py used to set `.host` right after
@@ -114,6 +116,15 @@ class PredictWindow(ui.Window):
                 self._request_button = ui.Button(
                     "Request Prediction", height=32, clicked_fn=self._request_clicked_fn
                 )
+                # Save the latest request's downloaded results somewhere
+                # permanent; enabled only once that result exists.
+                with ui.HStack(height=24, spacing=6):
+                    self._save_boundary_button = ui.Button(
+                        "Save Boundary (.vtp)", clicked_fn=lambda: self._save_clicked_fn("boundary"), enabled=False
+                    )
+                    self._save_volume_button = ui.Button(
+                        "Save Volume (.vti)", clicked_fn=lambda: self._save_clicked_fn("volume"), enabled=False
+                    )
 
                 ui.Spacer(height=8)
                 self._status_label = ui.Label("Idle.", word_wrap=True)
@@ -187,6 +198,10 @@ class PredictWindow(ui.Window):
 
     def set_busy(self, busy: bool) -> None:
         self._request_button.enabled = not busy
+
+    def set_save_enabled(self, boundary: bool, volume: bool) -> None:
+        self._save_boundary_button.enabled = boundary
+        self._save_volume_button.enabled = volume
 
     def set_install_busy(self, busy: bool) -> None:
         self._install_button.enabled = not busy
