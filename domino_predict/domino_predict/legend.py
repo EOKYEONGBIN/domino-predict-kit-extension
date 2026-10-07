@@ -1,5 +1,5 @@
 """
-Color legend for the prediction Faces, drawn as an overlay in the bottom-left
+Color legend for the prediction Faces, drawn as an overlay in the bottom-right
 of the active viewport so it shows up next to the model (and in screenshots).
 One shared color bar with a row of tick values per field underneath. Uses
 the same colormap image Kit-CAE's Faces material samples (omni.cae.viz's
@@ -71,7 +71,7 @@ class ColorLegend:
             with ui.VStack():
                 ui.Spacer()
                 with ui.HStack(height=0):
-                    ui.Spacer(width=16)
+                    ui.Spacer()
                     with ui.ZStack(width=_PAD + _NAME_WIDTH + _BAR_WIDTH + _PAD, height=0):
                         ui.Rectangle(style={"background_color": 0xA0000000, "border_radius": 4})
                         with ui.VStack(height=0, spacing=6):
@@ -98,9 +98,8 @@ class ColorLegend:
                                                 ui.Spacer()
                                             ui.Label(_format_tick(value, vmin, vmax), width=0, style=text_style)
                             ui.Spacer(height=2)
-                    ui.Spacer()
-                # Keep clear of the viewport's axis gizmo in the bottom-left.
-                ui.Spacer(height=56)
+                    ui.Spacer(width=16)
+                ui.Spacer(height=16)
         return True
 
     def hide(self) -> None:
