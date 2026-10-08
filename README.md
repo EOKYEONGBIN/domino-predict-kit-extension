@@ -36,6 +36,7 @@ Prediction imported (Local). Total 1m 52s (inference 1m 50s).   ← 완료 시 �
   - **Install Local Environment**: WSL 안에 추론 환경(가상환경, PyTorch, cuML, physicsnemo 패치, 학습된 모델)을 설치합니다. 진행 단계가 상태 줄에 표시되고, 끝나면 자동으로 Connect를 확인합니다.
   - **Remote**: 입력한 서버 IP로 SSH 접속해 추론합니다.
 - **설정 저장**: 모드와 서버 IP는 `~/.domino_predict_settings.json`에 저장돼서, Kit-CAE를 다시 켜도 유지됩니다. 켜질 때 저장된 설정으로 자동 연결 확인을 합니다.
+- **Streamlines 자동 설정**: UMean 속도로 유선을 만들고(진행 방향 forward, 굵기 0.02), 색은 속도 크기(`vector_magnitude`)로 **0 ~ 1.6** 고정 범위입니다(Rescale Mode `disable`, ScalarColor·AnimatedStreaks 두 셰이더 모두). 범위는 AhmedML CFD 체적 450개(전처리된 train/val)에서 케이스별 99.9% 값이 95%의 케이스에서 1.6 이하인 것을 기준으로 정했습니다. CFD 유선과 비교할 때는 CFD 쪽 Scalar Domain도 (0, 1.6)으로 맞추면 됩니다. 시작점 구는 형상 앞쪽(형상 길이의 0.8배 앞), 반지름은 폭·높이 중 작은 값의 0.4배입니다.
 - **결과 저장**: Save Boundary (.vtp) / Save Volume (.vti) 버튼으로 가장 최근 요청의 결과를 원하는 폴더에 따로 저장합니다. 저장하면 장면의 데이터셋(`DominoPrediction_N`, `DominoVolumePrediction_N`)이 저장한 파일을 보도록 바뀌어서, 장면을 Save As 한 뒤 임시 폴더가 지워져도 다시 열면 결과가 그대로 나옵니다. 받아 온 결과는 기본으로 Windows 임시 폴더(`%TEMP%\domino_predict_<요청ID>_...`)에 있습니다.
 - **소요시간**: 요청이 끝나면 전체 시간과 그중 추론에 걸린 시간을 상태 줄에 남깁니다.
 - **시각화**: Faces(표면 압력 / 벽전단응력), Streamlines(체적 속도장 유선)를 골라서 요청할 수 있고, 받은 결과로 Kit-CAE 연산자를 자동으로 만듭니다.

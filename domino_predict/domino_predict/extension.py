@@ -31,6 +31,14 @@ from .predict_window import PredictWindow
 PMEAN_RANGE_MIN = -1.0
 PMEAN_RANGE_MAX = 0.52
 
+# Fixed |UMean| color range for every prediction's Streamlines. From 450
+# AhmedML CFD volume fields (processed train/val): median |U| ~1.0 (inlet),
+# per-case 99.9th percentile <= 1.60 in 95% of cases; only tiny regions at
+# the front edges reach ~1.6-1.8. Use the same domain on CFD streamlines to
+# compare them side by side.
+UMAG_RANGE_MIN = 0.0
+UMAG_RANGE_MAX = 1.6
+
 # Legend bars for the Faces fields a DoMINO prediction contains (yPlusMean is
 # CFD-only). Same fixed ranges recommended for comparing cases with Rescale
 # Mode "disable": Cp is exactly 2 x pMean; wall shear stress is colored by
@@ -426,5 +434,25 @@ class DominoPredictExtension(omni.ext.IExt):
             colors_api = cae_viz.FieldSelectionAPI(sl_prim, "colors")
             colors_api.CreateFieldNamesAttr().Set(["UMean"])
             colors_api.GetModeAttr().Set(cae_viz.Tokens.vector_magnitude)
+            # Match edu_samples/domino_test.usd's CFD Streamlines_volume_10:
+            # integrate downstream only (default is "both") at width 0.02.
+            streamlines_api = cae_viz.StreamlinesAPI(sl_prim)
+            streamlines_api.CreateDirectionAttr().Set(cae_viz.Tokens.forward)
+            streamlines_api.CreateWidthAttr().Set(0.02)
 
         await wait_for_operator(loop, dispatcher, sl_path, "Streamlines", _configure())
+
+        # Fixed |UMean| color range on both streamline materials (ScalarColor,
+        # AnimatedStreaks), same as the Faces pMean range: "disable" keeps the
+        # operator from rescaling to each prediction's own min/max, and with
+        # it disabled enable_coloring has to be switched on here.
+        rescale_api = cae_viz.RescaleRangeAPI(sl_prim, "colors")
+        rescale_api.GetRescaleModeAttr().Set("disable")
+        for target_path in rescale_api.GetIncludesRel().GetTargets():
+            target_attr = stage.GetAttributeAtPath(target_path)
+            if target_attr:
+                target_attr.Set(Gf.Vec2f(UMAG_RANGE_MIN, UMAG_RANGE_MAX))
+        for target_path in rescale_api.GetEnableIncludesRel().GetTargets():
+            target_attr = stage.GetAttributeAtPath(target_path)
+            if target_attr:
+                target_attr.Set(True)
