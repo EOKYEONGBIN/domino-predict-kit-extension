@@ -6,6 +6,7 @@ the same colormap image Kit-CAE's Faces material samples (omni.cae.viz's
 cae/colormaps/gist_rainbow.png), so the bar matches the surface colors exactly.
 """
 
+import asyncio
 import os
 
 import omni.kit.app
@@ -43,10 +44,16 @@ class ColorLegend:
         self._frame = None
         self._wanted = False
 
-    async def show_when_ready(self, max_frames: int = 600) -> None:
+    def request_show(self) -> None:
+        """Marks the legend as wanted right away (so a hide() that comes
+        later always wins over a show still waiting), then shows it once the
+        viewport is ready."""
+        self._wanted = True
+        asyncio.ensure_future(self._show_when_ready())
+
+    async def _show_when_ready(self, max_frames: int = 600) -> None:
         """The viewport may not exist yet when the extension starts up, so
         keep trying for a while instead of giving up on the first frame."""
-        self._wanted = True
         app = omni.kit.app.get_app()
         for _ in range(max_frames):
             if not self._wanted:  # turned off again while waiting
@@ -54,6 +61,9 @@ class ColorLegend:
             if self.show():
                 return
             await app.next_update_async()
+
+    def set_fields(self, fields: list[tuple[str, float, float]]) -> None:
+        self._fields = fields
 
     def show(self) -> bool:
         """Builds the overlay (repeated calls just rebuild it). Returns False
@@ -64,6 +74,7 @@ class ColorLegend:
         if viewport_window is None:
             return False
         self._frame = viewport_window.get_frame(_FRAME_NAME)
+        self._frame.clear()  # rebuild with the current rows
         self._frame.visible = True
         image_path = _colormap_path()
         text_style = {"color": 0xFFFFFFFF, "font_size": 14}

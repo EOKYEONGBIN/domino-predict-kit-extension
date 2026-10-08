@@ -19,18 +19,20 @@ class PredictWindow(ui.Window):
         connect_clicked_fn,
         mode_changed_fn,
         install_clicked_fn,
+        legend_sections,
         legend_toggled_fn,
         save_clicked_fn,
         initial_mode: str = MODE_REMOTE,
         initial_host: str = "",
         **kwargs,
     ):
-        super().__init__(WINDOW_TITLE, width=420, height=450, **kwargs)
+        super().__init__(WINDOW_TITLE, width=420, height=640, **kwargs)
         self._request_clicked_fn = request_clicked_fn
         self._browse_clicked_fn = browse_clicked_fn
         self._connect_clicked_fn = connect_clicked_fn
         self._mode_changed_fn = mode_changed_fn
         self._install_clicked_fn = install_clicked_fn
+        self._legend_sections = legend_sections
         self._legend_toggled_fn = legend_toggled_fn
         self._save_clicked_fn = save_clicked_fn
         # AUDIT FIX (2026-09-29): set_build_fn's callback doesn't necessarily
@@ -88,13 +90,25 @@ class PredictWindow(ui.Window):
                         ui.Button("Connect", height=24, clicked_fn=self._connect_clicked_fn)
 
                 ui.Spacer(height=8)
-                with ui.HStack(height=24):
-                    self._legend_checkbox = ui.CheckBox(width=20)
-                    self._legend_checkbox.model.set_value(True)
-                    ui.Label("Legend UI")
-                self._legend_checkbox.model.add_value_changed_fn(
-                    lambda m: self._legend_toggled_fn(m.get_value_as_bool())
-                )
+                # Legend panel: one checkbox per legend row, grouped like the
+                # legend itself (Faces / Streamlines).
+                self._legend_checkboxes = {}
+                with ui.CollapsableFrame("Legend", height=0, collapsed=False):
+                    with ui.VStack(spacing=2, height=0):
+                        for si, (section, rows) in enumerate(self._legend_sections):
+                            ui.Label(section, height=20, style={"color": _COLOR_CHECKING})
+                            for ri, row in enumerate(rows):
+                                with ui.HStack(height=22):
+                                    ui.Spacer(width=10)
+                                    cb = ui.CheckBox(width=20)
+                                    cb.model.set_value(True)
+                                    self._legend_checkboxes[(si, ri)] = cb
+                                    ui.Label(row)
+                                cb.model.add_value_changed_fn(
+                                    lambda m, si=si, ri=ri: self._legend_toggled_fn(si, ri, m.get_value_as_bool())
+                                )
+
+                ui.Spacer(height=8)
 
                 ui.Label("Input STL:")
                 with ui.HStack(height=24):

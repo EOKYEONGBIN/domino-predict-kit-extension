@@ -51,18 +51,21 @@ UMAG_RANGE_MAX = 1.6
 NUT_RANGE_MIN = 0.0
 NUT_RANGE_MAX = 1.5e-4
 
-# Legend rows: (title, vmin, vmax), or (section title, None, None). Units
-# follow AhmedML's incompressible OpenFOAM output: pressure and wall shear
-# stress are kinematic (divided by density), Cp is dimensionless.
-LEGEND_FIELDS = [
-    ("Faces", None, None),
-    ("pMean (m^2/s^2)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
-    ("static_p__coeffMean (-)", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
-    ("wallShearStressMean, mag (m^2/s^2)", 0.0, 0.007),
-    ("Streamlines", None, None),
-    ("UMean, mag (m/s)", UMAG_RANGE_MIN, UMAG_RANGE_MAX),
-    ("pMean (m^2/s^2)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
-    ("nutMean (m^2/s)", NUT_RANGE_MIN, NUT_RANGE_MAX),
+# Legend sections -> rows (title, vmin, vmax); each row gets its own
+# checkbox in the window's Legend panel. Units follow AhmedML's
+# incompressible OpenFOAM output: pressure and wall shear stress are
+# kinematic (divided by density), Cp is dimensionless.
+LEGEND_SECTIONS = [
+    ("Faces", [
+        ("pMean (m²/s²)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
+        ("static_p__coeffMean (-)", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
+        ("wallShearStressMean, mag (m²/s²)", 0.0, 0.007),
+    ]),
+    ("Streamlines", [
+        ("UMean, mag (m/s)", UMAG_RANGE_MIN, UMAG_RANGE_MAX),
+        ("pMean (m²/s²)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
+        ("nutMean (m²/s)", NUT_RANGE_MIN, NUT_RANGE_MAX),
+    ]),
 ]
 
 
@@ -75,7 +78,9 @@ def _format_duration(seconds: float) -> str:
 class DominoPredictExtension(omni.ext.IExt):
     def on_startup(self, ext_id):
         self._request_counter = 0
-        self._legend = ColorLegend(LEGEND_FIELDS)
+        self._legend = ColorLegend([])
+        # (section index, row index) -> shown in the legend; all on at start
+        self._legend_rows_on = {(si, ri): True for si, (_, rows) in enumerate(LEGEND_SECTIONS) for ri in range(len(rows))}
         # Latest successful request: kind -> (downloaded file, dataset prim path)
         self._latest: dict[str, tuple[str, str]] = {}
         settings = remote_predict.load_settings()
@@ -85,14 +90,15 @@ class DominoPredictExtension(omni.ext.IExt):
             connect_clicked_fn=self._on_connect_clicked,
             mode_changed_fn=self._on_mode_changed,
             install_clicked_fn=self._on_install_clicked,
+            legend_sections=[(title, [row[0] for row in rows]) for title, rows in LEGEND_SECTIONS],
             legend_toggled_fn=self._on_legend_toggled,
             save_clicked_fn=self._on_save_clicked,
             initial_mode=settings["mode"],
             initial_host=settings["ssh_host"],
             visible=True,
         )
-        # The "Legend UI" toggle starts on, so show the legend right away.
-        asyncio.ensure_future(self._legend.show_when_ready())
+        # The Legend checkboxes start on, so show the legend right away.
+        self._update_legend()
         # Check the remembered mode/server as soon as the extension comes
         # up, instead of leaving the user to guess whether it's reachable
         # until they explicitly hit Connect.
@@ -107,11 +113,24 @@ class DominoPredictExtension(omni.ext.IExt):
             self._window.destroy()
             self._window = None
 
-    def _on_legend_toggled(self, on: bool):
-        if on:
-            asyncio.ensure_future(self._legend.show_when_ready())
-        else:
+    def _on_legend_toggled(self, section: int, row: int, on: bool):
+        self._legend_rows_on[(section, row)] = on
+        self._update_legend()
+
+    def _update_legend(self):
+        """Shows only the checked rows (with their section titles); hides the
+        whole legend when nothing is checked."""
+        fields = []
+        for si, (title, rows) in enumerate(LEGEND_SECTIONS):
+            checked = [r for ri, r in enumerate(rows) if self._legend_rows_on[(si, ri)]]
+            if checked:
+                fields.append((title, None, None))
+                fields += checked
+        if not fields:
             self._legend.hide()
+            return
+        self._legend.set_fields(fields)
+        self._legend.request_show()
 
     def _on_browse_clicked(self):
         import omni.kit.window.filepicker as filepicker
