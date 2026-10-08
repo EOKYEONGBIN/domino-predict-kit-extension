@@ -13,7 +13,7 @@ import omni.usd
 from omni.cae.core.commands import execute_command
 from omni.cae.schema import viz as cae_viz
 from omni.cae.usd_plugins_importers import import_to_stage
-from pxr import Gf, Usd, UsdGeom
+from pxr import Gf, Tf, Usd, UsdGeom
 
 from . import remote_predict
 from .cae_viz_helpers import wait_for_operator, wait_frames
@@ -223,6 +223,11 @@ class DominoPredictExtension(omni.ext.IExt):
 
         self._request_counter += 1
         n = self._request_counter
+        # Everything this request creates goes under one group, laid out like
+        # a CFD case (e.g. edu_samples/domino_test.usd's /World/ahmed_10_cfd):
+        # input_shape, boundary, volume, CAE/{Faces_boundary, ...}.
+        stem = Tf.MakeValidIdentifier(os.path.splitext(os.path.basename(stl_path))[0])
+        group = f"/World/DominoPrediction_{n}_{stem}"
 
         mode = self._window.mode
         self._window.set_busy(True)
@@ -230,7 +235,8 @@ class DominoPredictExtension(omni.ext.IExt):
         start = time.monotonic()
         try:
             self._window.set_status("Loading input shape...")
-            shape_path = await self._import_input_shape(stl_path, n)
+            UsdGeom.Xform.Define(omni.usd.get_context().get_stage(), group)
+            shape_path = await self._import_input_shape(stl_path, group)
 
             inference_start = time.monotonic()
             local_surface_path, local_volume_path = await remote_predict.request_prediction(
@@ -244,7 +250,7 @@ class DominoPredictExtension(omni.ext.IExt):
             ctx = omni.usd.get_context()
             shape_prim = ctx.get_stage().GetPrimAtPath(shape_path)
             if local_surface_path is not None:
-                await self._import_prediction(local_surface_path, n)
+                await self._import_prediction(local_surface_path, group)
                 # The Faces mesh (colored by the prediction) sits at the
                 # exact same location/scale as the plain input shape -- left
                 # visible, its opaque default-white material fully occludes
@@ -255,12 +261,12 @@ class DominoPredictExtension(omni.ext.IExt):
                 # wants the shape visible, since the streamlines flow around it.
                 UsdGeom.Imageable(shape_prim).MakeInvisible()
             if local_volume_path is not None:
-                await self._import_volume_streamlines(local_volume_path, shape_path, n)
+                await self._import_volume_streamlines(local_volume_path, shape_path, group)
             self._latest = {}
             if local_surface_path is not None:
-                self._latest["boundary"] = (local_surface_path, f"/World/DominoPrediction_{n}")
+                self._latest["boundary"] = (local_surface_path, f"{group}/boundary")
             if local_volume_path is not None:
-                self._latest["volume"] = (local_volume_path, f"/World/DominoVolumePrediction_{n}")
+                self._latest["volume"] = (local_volume_path, f"{group}/volume")
             where = "Local" if mode == remote_predict.MODE_LOCAL else "Remote"
             self._window.set_status(
                 f"Prediction imported ({where}). Total {_format_duration(time.monotonic() - start)} "
@@ -321,13 +327,13 @@ class DominoPredictExtension(omni.ext.IExt):
         )
         dialog.show()
 
-    async def _import_input_shape(self, stl_path: str, n: int) -> str:
+    async def _import_input_shape(self, stl_path: str, group: str) -> str:
         ctx = omni.usd.get_context()
         stage = ctx.get_stage()
         if stage is None:
             raise RuntimeError("No open USD stage to import the input shape into")
 
-        shape_path = f"/World/InputShape_{n}"
+        shape_path = f"{group}/input_shape"
 
         # Not a TemporaryDirectory (self-cleaning) -- the stage keeps a live
         # Reference to this file, which must stay resolvable on disk for the
@@ -347,16 +353,16 @@ class DominoPredictExtension(omni.ext.IExt):
         await wait_frames(3)
         return shape_path
 
-    async def _import_prediction(self, vtp_path: str, n: int):
+    async def _import_prediction(self, vtp_path: str, group: str):
         ctx = omni.usd.get_context()
         stage = ctx.get_stage()
         if stage is None:
             raise RuntimeError("No open USD stage to import the prediction into")
 
-        UsdGeom.Xform.Define(stage, "/World/CAE")
+        UsdGeom.Xform.Define(stage, f"{group}/CAE")
 
-        dataset_path = f"/World/DominoPrediction_{n}"
-        faces_path = f"/World/CAE/Faces_DominoPrediction_{n}"
+        dataset_path = f"{group}/boundary"
+        faces_path = f"{group}/CAE/Faces_boundary"
 
         dataset_prim = await import_to_stage(vtp_path, dataset_path)
         await wait_frames(3)
@@ -398,7 +404,7 @@ class DominoPredictExtension(omni.ext.IExt):
 
         # Same pattern as CAE_Examples/AhmedML/run_1/open_ahmed_cae_scene.py's
         # BoundingBox_boundary_1.
-        bbox_path = f"/World/CAE/BoundingBox_DominoPrediction_{n}"
+        bbox_path = f"{group}/CAE/BoundingBox_boundary"
         await execute_command(
             "CreateCaeVizBoundingBox",
             dataset_paths=[str(dataset_prim.GetPath())],
@@ -406,17 +412,17 @@ class DominoPredictExtension(omni.ext.IExt):
         )
         await wait_frames(3)
 
-    async def _import_volume_streamlines(self, vti_path: str, shape_path: str, n: int):
+    async def _import_volume_streamlines(self, vti_path: str, shape_path: str, group: str):
         ctx = omni.usd.get_context()
         stage = ctx.get_stage()
         if stage is None:
             raise RuntimeError("No open USD stage to import the volume prediction into")
 
-        UsdGeom.Xform.Define(stage, "/World/CAE")
+        UsdGeom.Xform.Define(stage, f"{group}/CAE")
 
-        dataset_path = f"/World/DominoVolumePrediction_{n}"
-        sl_path = f"/World/CAE/Streamlines_DominoPrediction_{n}"
-        sphere_path = f"/World/CAE/SeedSphere_DominoPrediction_{n}"
+        dataset_path = f"{group}/volume"
+        sl_path = f"{group}/CAE/Streamlines_volume"
+        sphere_path = f"{group}/CAE/UnitSphere"
 
         dataset_prim = await import_to_stage(vti_path, dataset_path)
         await wait_frames(3)
