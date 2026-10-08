@@ -40,7 +40,7 @@ Prediction imported (Local). Total 1m 52s (inference 1m 50s).   ← 완료 시 �
 - **결과 저장**: Save Boundary (.vtp) / Save Volume (.vti) 버튼으로 가장 최근 요청의 결과를 원하는 폴더에 따로 저장합니다. 저장하면 장면의 데이터셋(`DominoPrediction_N`, `DominoVolumePrediction_N`)이 저장한 파일을 보도록 바뀌어서, 장면을 Save As 한 뒤 임시 폴더가 지워져도 다시 열면 결과가 그대로 나옵니다. 받아 온 결과는 기본으로 Windows 임시 폴더(`%TEMP%\domino_predict_<요청ID>_...`)에 있습니다.
 - **소요시간**: 요청이 끝나면 전체 시간과 그중 추론에 걸린 시간을 상태 줄에 남깁니다.
 - **시각화**: Faces(표면 압력 / 벽전단응력), Streamlines(체적 속도장 유선)를 골라서 요청할 수 있고, 받은 결과로 Kit-CAE 연산자를 자동으로 만듭니다.
-- **고정 색상 범위 + 범례**: 예측 Faces의 pMean 색상 범위를 항상 **-1.00 ~ 0.52**로 고정합니다(자동 재조정 끔). 그래서 어떤 STL을 넣어도 같은 압력은 같은 색입니다. 범위는 AhmedML CFD 500개 전체에서 정했습니다. 뷰포트 오른쪽 아래에 DoMINO가 내는 Faces 필드 3개의 범례가 나옵니다: pMean (-1.00 ~ 0.52), Cp = 2 × pMean (-2.00 ~ 1.04), 벽 전단응력 크기 (0 ~ 0.007, Field Selection Mode를 `vector_magnitude`로). 다른 필드로 바꿔 볼 때는 Rescale Mode `disable` 상태에서 Shader의 Scalar Domain을 범례 값으로 맞추면 됩니다. 범례는 익스텐션이 켜지면 바로 표시되고, 창의 **Legend UI** 토글로 켜고 끌 수 있습니다(기본 켜짐). 범위를 바꾸려면 `extension.py`의 `PMEAN_RANGE_MIN/MAX`, `LEGEND_FIELDS`를 고치면 됩니다.
+- **고정 색상 범위 + 범례**: 예측 Faces의 pMean 색상 범위를 항상 **-1.00 ~ 0.52**로 고정합니다(자동 재조정 끔). 그래서 어떤 STL을 넣어도 같은 압력은 같은 색입니다. 범위는 AhmedML CFD 500개 전체에서 정했습니다. 뷰포트 오른쪽 아래 범례에 DoMINO가 예측하는 필드의 범위를 단위와 함께 표시합니다 (Faces: pMean (m^2/s^2) -1.00 ~ 0.52, Cp (-) -2.00 ~ 1.04, 벽 전단응력 크기 (m^2/s^2) 0 ~ 0.007 / Streamlines: UMean 크기 (m/s) 0 ~ 1.6, pMean (m^2/s^2) -1.00 ~ 0.52, nutMean (m^2/s) 0 ~ 1.5e-4). 압력·전단응력은 밀도로 나눈 값입니다(OpenFOAM 비압축성). 다른 필드로 바꿔 볼 때는 Rescale Mode `disable` 상태에서 Shader의 Scalar Domain을 범례 값으로 맞추면 됩니다(벡터는 Field Selection Mode `vector_magnitude`). 범례는 익스텐션이 켜지면 바로 표시되고, 창의 **Legend UI** 토글로 켜고 끌 수 있습니다(기본 켜짐). 범위는 `extension.py`의 `PMEAN_RANGE_*`, `UMAG_RANGE_*`, `NUT_RANGE_*`, `LEGEND_FIELDS`에서 바꿉니다.
 
 ## 구성
 
@@ -50,7 +50,7 @@ domino_predict/                      ← 익스텐션 폴더
 ├── domino_predict/
 │   ├── extension.py                 ← 시작/종료, 요청 흐름, 설치, 소요시간, 결과를 Kit-CAE 시각화로 세팅
 │   ├── predict_window.py            ← UI
-│   ├── legend.py                    ← 뷰포트 오른쪽 아래 색상 범례 (컬러바 1개 + 필드 3줄)
+│   ├── legend.py                    ← 뷰포트 오른쪽 아래 색상 범례 (컬러바 1개 + Faces 3줄 / Streamlines 3줄)
 │   ├── remote_predict.py            ← Local(WSL2) / Remote(SSH) 요청, 연결 확인, 설치 실행, 설정 저장
 │   └── cae_viz_helpers.py           ← Kit-CAE 연산자 완료 대기 등 보조 함수
 └── wsl_setup/

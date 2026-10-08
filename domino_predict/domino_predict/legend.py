@@ -15,7 +15,7 @@ _FRAME_NAME = "domino_predict_legend"
 _N_TICKS = 5
 _BAR_WIDTH = 300
 _BAR_HEIGHT = 14
-_NAME_WIDTH = 200
+_NAME_WIDTH = 260
 _PAD = 10
 
 
@@ -29,13 +29,16 @@ def _colormap_path() -> str | None:
 
 
 def _format_tick(value: float, vmin: float, vmax: float) -> str:
+    span = abs(vmax - vmin)
+    if span < 1e-3:  # e.g. nutMean, ~1.5e-4
+        return "0" if value == 0 else f"{value:.1e}"
     # Small ranges (e.g. wall shear stress, ~0.007) need more decimals.
-    return f"{value:.4f}" if abs(vmax - vmin) < 0.1 else f"{value:.2f}"
+    return f"{value:.4f}" if span < 0.1 else f"{value:.2f}"
 
 
 class ColorLegend:
     def __init__(self, fields: list[tuple[str, float, float]]):
-        """fields: (title, vmin, vmax) per color bar, top to bottom."""
+        """fields: (title, vmin, vmax) per tick row, top to bottom; (title, None, None) is a section title."""
         self._fields = fields
         self._frame = None
         self._wanted = False
@@ -64,6 +67,7 @@ class ColorLegend:
         self._frame.visible = True
         image_path = _colormap_path()
         text_style = {"color": 0xFFFFFFFF, "font_size": 14}
+        section_style = {"color": 0xFFB0B0B0, "font_size": 14}
 
         # One shared color bar (every field uses the same colormap), then one
         # row per field: name on the left, its tick values under the bar.
@@ -88,6 +92,11 @@ class ColorLegend:
                                 else:
                                     ui.Label("(colormap image not found)", style=text_style)
                             for title, vmin, vmax in self._fields:
+                                if vmin is None:  # section title
+                                    with ui.HStack(height=0):
+                                        ui.Spacer(width=_PAD)
+                                        ui.Label(title, style=section_style)
+                                    continue
                                 with ui.HStack(height=0):
                                     ui.Spacer(width=_PAD)
                                     ui.Label(title, width=_NAME_WIDTH, style=text_style)

@@ -44,10 +44,25 @@ UMAG_RANGE_MAX = 1.6
 # Mode "disable": Cp is exactly 2 x pMean; wall shear stress is colored by
 # magnitude (Field Selection Mode "vector_magnitude"), 0.007 covers 99% of
 # the surface in 95% of the 500 cases.
+# Volume fields (Streamlines), from the same 450 CFD volume fields as
+# UMAG_RANGE_*: volume pMean reuses the Faces range (its own 0.1th
+# percentile is -0.84 or higher in 95% of cases, max ~0.52); nutMean is
+# heavily skewed (median ~1e-6), its 99.9th percentile is 1.4e-4 to 1.7e-4.
+NUT_RANGE_MIN = 0.0
+NUT_RANGE_MAX = 1.5e-4
+
+# Legend rows: (title, vmin, vmax), or (section title, None, None). Units
+# follow AhmedML's incompressible OpenFOAM output: pressure and wall shear
+# stress are kinematic (divided by density), Cp is dimensionless.
 LEGEND_FIELDS = [
-    ("pMean", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
-    ("static_p__coeffMean", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
-    ("wallShearStressMean (mag)", 0.0, 0.007),
+    ("Faces", None, None),
+    ("pMean (m^2/s^2)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
+    ("static_p__coeffMean (-)", 2 * PMEAN_RANGE_MIN, 2 * PMEAN_RANGE_MAX),
+    ("wallShearStressMean, mag (m^2/s^2)", 0.0, 0.007),
+    ("Streamlines", None, None),
+    ("UMean, mag (m/s)", UMAG_RANGE_MIN, UMAG_RANGE_MAX),
+    ("pMean (m^2/s^2)", PMEAN_RANGE_MIN, PMEAN_RANGE_MAX),
+    ("nutMean (m^2/s)", NUT_RANGE_MIN, NUT_RANGE_MAX),
 ]
 
 
