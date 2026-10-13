@@ -69,17 +69,22 @@ domino_predict/                      ← 익스텐션 폴더
 
 ## Local 모드 준비 (이 PC의 WSL2에서 추론)
 
-필요한 것: NVIDIA GPU(VRAM 8GB 이상 권장, 추론 1회 약 5GB 사용), Windows용 NVIDIA 드라이버.
+필요한 것: NVIDIA GPU(VRAM 8GB 이상 권장, 추론 1회 약 5GB 사용), Windows용 NVIDIA 드라이버 **580 이상**(CUDA 13). Kit-CAE가 실행되는 PC라면 드라이버는 이미 설치되어 있습니다.
 
-**1. WSL2 설치 (직접, 처음 한 번)** — 관리자 권한과 재부팅이 필요해서 익스텐션이 대신하지 않습니다.
-```powershell
-# 관리자 PowerShell
-wsl --install -d Ubuntu-24.04
-```
-재부팅 후 시작 메뉴에서 **Ubuntu**를 한 번 실행해 사용자 계정을 만듭니다.
+**설치는 버튼 하나로 진행합니다** — 익스텐션에서 **Server Settings → Local (WSL2) → Install Local Environment**.
+버튼이 지금 상태를 확인해서 필요한 단계만 진행합니다.
 
-**2. 추론 환경 설치 (버튼 하나)** — 익스텐션에서 **Server Settings → Local (WSL2) → Install Local Environment**.
-약 7GB를 받으므로 처음에는 10~20분 정도 걸립니다. sudo는 필요 없습니다. 끝나면 자동으로 Connect가 확인되고 `Connect`(초록)가 됩니다.
+| 상태 | 버튼이 하는 일 |
+|---|---|
+| WSL이나 Ubuntu가 없음 | Windows 관리자 확인창(UAC)을 띄워 `wsl --install -d Ubuntu-24.04 --no-launch` 실행. **"예"를 눌러야 합니다.** 처음 설치하는 PC는 보통 **재부팅 후 Install을 한 번 더** 누르라는 안내가 나옵니다 |
+| Ubuntu가 WSL 1 | WSL 2로 변환 (GPU는 WSL 2에서만 보입니다) |
+| Ubuntu 첫 실행(사용자 만들기)을 안 함 | 사용자 이름·비밀번호 입력 없이 쓰도록 기본 사용자를 root로 설정 |
+| 기본 배포판이 Ubuntu가 아님 (예: docker-desktop) | 따로 할 일 없음 — 익스텐션은 항상 Ubuntu를 직접 지정해서 실행합니다 |
+| NVIDIA 드라이버가 580 미만 | 드라이버는 자동 설치하지 않고, 안내와 함께 NVIDIA 다운로드 페이지를 엽니다 (제조사·GPU마다 달라서 잘못 덮어쓰면 위험) |
+| 모두 준비됨 | 추론 환경 설치 (약 7GB, 처음에는 10~20분). sudo 불필요. 끝나면 자동으로 `Connect`(초록) |
+
+잘 안 될 때 PowerShell에서 확인: `wsl --status`, `wsl -l -v`(설치된 배포판·버전), `wsl -d Ubuntu-24.04 -e bash -lc "echo ok"`.
+가상화 관련 오류가 나면 BIOS에서 가상화(VT-x / SVM)를 켜야 합니다.
 
 > WSL 터미널에서 직접 실행해도 됩니다: `bash /mnt/c/<이 저장소 경로>/domino_predict/wsl_setup/setup_local_inference.sh`
 

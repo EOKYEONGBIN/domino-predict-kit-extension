@@ -30,10 +30,16 @@ SETUP_SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wsl_setup", "setup_local_inference.sh"
 )
 LOCAL_VENV_PYTHON = "~/venvs/domino_infer/bin/python"
-WSL_INSTALL_HINT = (
-    "WSL2 is not available. In an admin PowerShell run 'wsl --install -d Ubuntu-24.04', "
-    "reboot, open Ubuntu once to create a user, then click Connect again."
-)
+# The Install button installs this distro when no Ubuntu is present.
+LOCAL_DISTRO = "Ubuntu-24.04"
+# torch cu130 (CUDA 13) needs an NVIDIA driver from the R580 branch or newer.
+# WSL2 uses the Windows driver, so this is the Windows driver version.
+MIN_DRIVER_MAJOR = 580
+NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx"
+# Ubuntu distro the local backend runs in, found by _diagnose_wsl(). Commands
+# target it explicitly so another default distro (e.g. docker-desktop, which
+# has no bash) doesn't break them.
+_distro: str | None = None
 
 SSH_USER = "YOUR_USER"  # SSH account on the inference server
 SSH_KEY_PATH = os.path.expanduser("~/.ssh/id_ed25519")
@@ -113,7 +119,129 @@ async def _run(cmd: list[str]) -> str:
 def _wsl_cmd(command: str) -> list[str]:
     # -e runs bash directly (no extra Windows-side shell parsing); -l loads
     # the login profile so ~ and PATH match an interactive WSL session.
-    return ["wsl.exe", "-e", "bash", "-lc", command]
+    distro = ["-d", _distro] if _distro else []
+    return ["wsl.exe", *distro, "-e", "bash", "-lc", command]
+
+
+async def _run_wsl_exe(args: list[str], timeout: float = 60) -> tuple[int, str]:
+    """Runs wsl.exe itself (e.g. -l -v, --set-version) and returns (exit code,
+    output); exit code -1 if wsl.exe is missing or the call timed out.
+    WSL_UTF8 makes wsl.exe's own messages UTF-8 instead of UTF-16, and stdin is
+    closed so Ubuntu's first-run prompt (new user name) fails instead of
+    waiting forever."""
+    env = dict(os.environ, WSL_UTF8="1")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "wsl.exe", *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+    except OSError as e:
+        return -1, str(e)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return -1, f"wsl.exe {' '.join(args)} timed out"
+    text = out.decode("utf-16-le", errors="replace") if b"\x00" in out else out.decode(errors="replace")
+    return proc.returncode, text.replace("\x00", "").strip()
+
+
+def _last_lines(text: str, n: int = 4) -> str:
+    return "\n".join(text.strip().splitlines()[-n:])
+
+
+async def _diagnose_wsl() -> tuple[str, str]:
+    """Finds the Ubuntu distro and checks it can run a command. Returns
+    (state, detail), state one of:
+      ok          ready to use
+      no_wsl      WSL itself is not installed / not enabled
+      no_ubuntu   WSL works but no Ubuntu distro is installed
+      wsl1        Ubuntu runs on WSL 1 (no GPU access)
+      needs_user  Ubuntu's first-run user setup was never done
+      broken      Ubuntu exists but does not start (reboot / virtualization)"""
+    global _distro
+    rc, out = await _run_wsl_exe(["-l", "-v"], timeout=30)
+    rows = []  # (name, version)
+    for line in out.splitlines():
+        parts = line.strip().lstrip("*").split()
+        if len(parts) >= 3 and parts[-1] in ("1", "2"):
+            rows.append((" ".join(parts[:-2]), parts[-1]))
+    if not rows:
+        return ("no_ubuntu" if rc == 0 else "no_wsl"), out
+    ubuntu = [r for r in rows if r[0] == LOCAL_DISTRO] or [r for r in rows if r[0].lower().startswith("ubuntu")]
+    if not ubuntu:
+        return "no_ubuntu", "Installed: " + ", ".join(r[0] for r in rows)
+    name, version = ubuntu[0]
+    _distro = name
+    if version == "1":
+        return "wsl1", name
+    rc, out = await _run_wsl_exe(["-d", name, "-e", "bash", "-lc", "echo ok"])
+    if rc == 0 and "ok" in out:
+        return "ok", name
+    rc_root, out_root = await _run_wsl_exe(["-d", name, "-u", "root", "-e", "bash", "-lc", "echo ok"])
+    if rc_root == 0 and "ok" in out_root:
+        return "needs_user", out
+    return "broken", out or out_root
+
+
+def _wsl_state_message(state: str, detail: str) -> str:
+    if state in ("no_wsl", "no_ubuntu"):
+        return ("WSL2 + Ubuntu are not installed. Click 'Install Local Environment' "
+                "(it asks for administrator permission and may need a restart).")
+    if state == "wsl1":
+        return f"{detail} runs on WSL 1, but the GPU needs WSL 2. Click 'Install Local Environment' to convert it."
+    if state == "needs_user":
+        return "Ubuntu has not been set up yet. Click 'Install Local Environment'."
+    return ("WSL2 is installed but Ubuntu does not start. Restart Windows; if it still fails, "
+            "enable virtualization (VT-x / SVM) in the BIOS.\n" + _last_lines(detail))
+
+
+async def _check_driver() -> tuple[bool, str]:
+    """GPU visible inside WSL, with a driver new enough for CUDA 13."""
+    try:
+        out = await _run(_wsl_cmd("nvidia-smi --query-gpu=driver_version --format=csv,noheader"))
+    except (PredictionError, OSError):
+        return False, "WSL2 cannot see the NVIDIA GPU. Install the Windows NVIDIA driver."
+    version = out.strip().splitlines()[0].strip() if out.strip() else ""
+    try:
+        major = int(version.split(".")[0])
+    except ValueError:
+        return True, version  # unknown format: let the install itself decide
+    if major < MIN_DRIVER_MAJOR:
+        return False, (f"NVIDIA driver {version} is too old for CUDA 13 (needs {MIN_DRIVER_MAJOR} or newer). "
+                       "Update the Windows NVIDIA driver, then click Install again.")
+    return True, version
+
+
+async def _install_wsl_elevated() -> tuple[bool, str]:
+    """wsl --install needs administrator rights: runs it through a UAC prompt
+    and waits for it. --no-launch skips opening an Ubuntu window."""
+    ps = (f"$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','{LOCAL_DISTRO}','--no-launch' "
+          "-Verb RunAs -Wait -PassThru; exit $p.ExitCode")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "powershell.exe", "-NoProfile", "-Command", ps,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except OSError as e:
+        return False, str(e)
+    out, _ = await proc.communicate()
+    return proc.returncode == 0, out.decode(errors="replace")
+
+
+async def _make_root_default(name: str) -> None:
+    """Skips Ubuntu's interactive first-run user setup: makes root the default
+    user (no password prompt, and the setup script needs no sudo)."""
+    await _run_wsl_exe([
+        "-d", name, "-u", "root", "-e", "bash", "-lc",
+        r"grep -q '^\[user\]' /etc/wsl.conf 2>/dev/null || printf '\n[user]\ndefault=root\n' >> /etc/wsl.conf",
+    ])
+    await _run_wsl_exe(["--terminate", name])
 
 
 def _to_wsl_path(windows_path: str) -> str:
@@ -156,14 +284,12 @@ def _backend(mode: str):
 async def _local_check() -> tuple[bool, str]:
     """Checks the local WSL2 setup one layer at a time, so the message says
     which layer is missing (WSL itself / GPU driver / our environment)."""
-    try:
-        await _run(_wsl_cmd("echo ok"))
-    except (PredictionError, OSError):
-        return False, WSL_INSTALL_HINT
-    try:
-        await _run(_wsl_cmd("nvidia-smi -L"))
-    except PredictionError:
-        return False, "WSL2 cannot see the NVIDIA GPU. Install or update the Windows NVIDIA driver."
+    state, detail = await _diagnose_wsl()
+    if state != "ok":
+        return False, _wsl_state_message(state, detail)
+    ok, msg = await _check_driver()
+    if not ok:
+        return False, msg
     try:
         await _run(_wsl_cmd(
             f"test -x {LOCAL_VENV_PYTHON} && test -x {REMOTE_RUN_SCRIPT} && ls {REMOTE_MODEL_DIR}/*.mdlus"
@@ -193,18 +319,53 @@ async def test_connection(mode: str, host: str = "") -> tuple[bool, str]:
 
 
 async def install_local_environment(progress_cb=None) -> tuple[bool, str]:
-    """Runs wsl_setup/setup_local_inference.sh inside WSL2 (no sudo needed)
-    and forwards its "=== ... ===" step lines to progress_cb. Takes roughly
-    10-20 minutes on a fresh machine (PyTorch + cuML downloads, ~7GB)."""
+    """Gets this PC ready for local inference: installs WSL2 + Ubuntu if needed
+    (UAC prompt; a first install usually needs a restart and a second click),
+    checks the NVIDIA driver, then runs wsl_setup/setup_local_inference.sh
+    inside Ubuntu (no sudo needed) and forwards its "=== ... ===" step lines
+    to progress_cb. The environment part takes roughly 10-20 minutes on a
+    fresh machine (PyTorch + cuML downloads, ~7GB)."""
 
     def report(msg: str):
         if progress_cb is not None:
             progress_cb(msg)
 
-    try:
-        await _run(_wsl_cmd("echo ok"))
-    except (PredictionError, OSError):
-        return False, WSL_INSTALL_HINT
+    # 1) WSL2 + Ubuntu: install through a UAC prompt if missing, convert
+    #    WSL 1 to 2, and skip Ubuntu's interactive first-run user setup.
+    state, detail = await _diagnose_wsl()
+    if state in ("no_wsl", "no_ubuntu"):
+        report("Installing WSL2 + Ubuntu -- approve the Windows administrator prompt...")
+        ok, out = await _install_wsl_elevated()
+        if not ok:
+            return False, "WSL install was cancelled or failed.\n" + _last_lines(out)
+        state, detail = await _diagnose_wsl()
+        if state in ("no_wsl", "no_ubuntu", "broken"):
+            return False, "WSL2 + Ubuntu were installed. Restart Windows, then click 'Install Local Environment' again."
+    if state == "wsl1":
+        report(f"Converting {detail} to WSL 2...")
+        rc, out = await _run_wsl_exe(["--set-version", _distro, "2"], timeout=1800)
+        if rc != 0:
+            return False, ("Could not switch Ubuntu to WSL 2. Enable virtualization (VT-x / SVM) in the BIOS "
+                           "and restart.\n" + _last_lines(out))
+        state, detail = await _diagnose_wsl()
+    if state == "needs_user":
+        report("Setting up Ubuntu (first run)...")
+        await _make_root_default(_distro)
+        state, detail = await _diagnose_wsl()
+    if state != "ok":
+        return False, _wsl_state_message(state, detail)
+
+    # 2) GPU driver: checked, not installed -- driver packages are specific to
+    #    the GPU/laptop maker, and Kit-CAE already needs a working one.
+    ok, msg = await _check_driver()
+    if not ok:
+        if "too old" in msg:
+            import webbrowser
+
+            webbrowser.open(NVIDIA_DRIVER_URL)
+        return False, msg
+
+    # 3) Our inference environment inside Ubuntu.
     if not os.path.isfile(SETUP_SCRIPT):
         return False, f"Setup script not found: {SETUP_SCRIPT}"
 
