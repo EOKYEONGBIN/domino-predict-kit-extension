@@ -170,7 +170,10 @@ async def _diagnose_wsl() -> tuple[str, str]:
         if len(parts) >= 3 and parts[-1] in ("1", "2"):
             rows.append((" ".join(parts[:-2]), parts[-1]))
     if not rows:
-        return ("no_ubuntu" if rc == 0 else "no_wsl"), out
+        # `wsl -l -v` also fails when WSL works but has no distro at all, so
+        # ask `wsl --version` whether WSL itself is there.
+        rc_version, _ = await _run_wsl_exe(["--version"], timeout=30)
+        return ("no_ubuntu" if rc_version == 0 else "no_wsl"), out
     ubuntu = [r for r in rows if r[0] == LOCAL_DISTRO] or [r for r in rows if r[0].lower().startswith("ubuntu")]
     if not ubuntu:
         return "no_ubuntu", "Installed: " + ", ".join(r[0] for r in rows)
@@ -188,9 +191,11 @@ async def _diagnose_wsl() -> tuple[str, str]:
 
 
 def _wsl_state_message(state: str, detail: str) -> str:
-    if state in ("no_wsl", "no_ubuntu"):
-        return ("WSL2 + Ubuntu are not installed. Click 'Install Local Environment' "
+    if state == "no_wsl":
+        return ("WSL2 is not installed. Click 'Install Local Environment' "
                 "(it asks for administrator permission and may need a restart).")
+    if state == "no_ubuntu":
+        return f"WSL2 is installed but {LOCAL_DISTRO} is not. Click 'Install Local Environment'."
     if state == "wsl1":
         return f"{detail} runs on WSL 1, but the GPU needs WSL 2. Click 'Install Local Environment' to convert it."
     if state == "needs_user":
@@ -217,8 +222,10 @@ async def _check_driver() -> tuple[bool, str]:
 
 
 async def _install_wsl_elevated() -> tuple[bool, str]:
-    """wsl --install needs administrator rights: runs it through a UAC prompt
-    and waits for it. --no-launch skips opening an Ubuntu window."""
+    """Installing WSL itself needs administrator rights: runs wsl --install
+    through a UAC prompt and waits for it. On a PC without WSL this usually
+    installs only WSL and asks for a restart; Ubuntu is installed after that
+    by _install_ubuntu(). --no-launch skips opening an Ubuntu window."""
     ps = (f"$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','{LOCAL_DISTRO}','--no-launch' "
           "-Verb RunAs -Wait -PassThru; exit $p.ExitCode")
     try:
@@ -232,6 +239,14 @@ async def _install_wsl_elevated() -> tuple[bool, str]:
         return False, str(e)
     out, _ = await proc.communicate()
     return proc.returncode == 0, out.decode(errors="replace")
+
+
+async def _install_ubuntu() -> tuple[bool, str]:
+    """Installs the Ubuntu distro into an existing WSL. Needs no administrator
+    rights; --no-launch skips Ubuntu's window and its interactive user setup
+    (the distro then starts as root). Downloads ~300MB."""
+    rc, out = await _run_wsl_exe(["--install", "-d", LOCAL_DISTRO, "--no-launch"], timeout=1800)
+    return rc == 0, out
 
 
 async def _make_root_default(name: str) -> None:
@@ -319,8 +334,9 @@ async def test_connection(mode: str, host: str = "") -> tuple[bool, str]:
 
 
 async def install_local_environment(progress_cb=None) -> tuple[bool, str]:
-    """Gets this PC ready for local inference: installs WSL2 + Ubuntu if needed
-    (UAC prompt; a first install usually needs a restart and a second click),
+    """Gets this PC ready for local inference: installs WSL2 if needed (UAC
+    prompt; a first install usually needs a restart and a second click), then
+    Ubuntu (no prompt),
     checks the NVIDIA driver, then runs wsl_setup/setup_local_inference.sh
     inside Ubuntu (no sudo needed) and forwards its "=== ... ===" step lines
     to progress_cb. The environment part takes roughly 10-20 minutes on a
@@ -330,17 +346,24 @@ async def install_local_environment(progress_cb=None) -> tuple[bool, str]:
         if progress_cb is not None:
             progress_cb(msg)
 
-    # 1) WSL2 + Ubuntu: install through a UAC prompt if missing, convert
-    #    WSL 1 to 2, and skip Ubuntu's interactive first-run user setup.
+    # 1) WSL2 + Ubuntu: WSL through a UAC prompt if missing, Ubuntu without
+    #    one, convert WSL 1 to 2, skip Ubuntu's interactive first-run setup.
     state, detail = await _diagnose_wsl()
-    if state in ("no_wsl", "no_ubuntu"):
-        report("Installing WSL2 + Ubuntu -- approve the Windows administrator prompt...")
+    if state == "no_wsl":
+        report("Installing WSL2 -- approve the Windows administrator prompt...")
         ok, out = await _install_wsl_elevated()
         if not ok:
             return False, "WSL install was cancelled or failed.\n" + _last_lines(out)
         state, detail = await _diagnose_wsl()
-        if state in ("no_wsl", "no_ubuntu", "broken"):
-            return False, "WSL2 + Ubuntu were installed. Restart Windows, then click 'Install Local Environment' again."
+        if state == "no_wsl":
+            return False, "WSL2 was installed. Restart Windows, then click 'Install Local Environment' again."
+    if state == "no_ubuntu":
+        report(f"Installing {LOCAL_DISTRO} (no administrator prompt, ~300MB)...")
+        ok, out = await _install_ubuntu()
+        state, detail = await _diagnose_wsl()
+        if state in ("no_wsl", "no_ubuntu"):
+            return False, (f"Could not install {LOCAL_DISTRO}. If WSL was just installed, restart Windows "
+                           "and click 'Install Local Environment' again.\n" + _last_lines(out))
     if state == "wsl1":
         report(f"Converting {detail} to WSL 2...")
         rc, out = await _run_wsl_exe(["--set-version", _distro, "2"], timeout=1800)

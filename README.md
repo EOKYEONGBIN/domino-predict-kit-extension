@@ -76,7 +76,8 @@ domino_predict/                      ← 익스텐션 폴더
 
 | 상태 | 버튼이 하는 일 |
 |---|---|
-| WSL이나 Ubuntu가 없음 | Windows 관리자 확인창(UAC)을 띄워 `wsl --install -d Ubuntu-24.04 --no-launch` 실행. **"예"를 눌러야 합니다.** 처음 설치하는 PC는 보통 **재부팅 후 Install을 한 번 더** 누르라는 안내가 나옵니다 |
+| WSL이 없음 | Windows 관리자 확인창(UAC)을 띄워 WSL 설치. **"예"를 눌러야 합니다.** 처음 설치하는 PC는 보통 **재부팅 후 Install을 한 번 더** 누르라는 안내가 나옵니다 |
+| WSL은 있지만 Ubuntu가 없음 (재부팅 후 두 번째 클릭 포함) | 관리자 확인 없이 `wsl --install -d Ubuntu-24.04 --no-launch`로 Ubuntu 설치(약 300MB). 사용자 입력 없이 root로 바로 쓰고, 이어서 추론 환경까지 설치 |
 | Ubuntu가 WSL 1 | WSL 2로 변환 (GPU는 WSL 2에서만 보입니다) |
 | Ubuntu 첫 실행(사용자 만들기)을 안 함 | 사용자 이름·비밀번호 입력 없이 쓰도록 기본 사용자를 root로 설정 |
 | 기본 배포판이 Ubuntu가 아님 (예: docker-desktop) | 따로 할 일 없음 — 익스텐션은 항상 Ubuntu를 직접 지정해서 실행합니다 |
