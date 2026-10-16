@@ -18,6 +18,7 @@ import asyncio
 import collections
 import json
 import os
+import re
 import shlex
 import tempfile
 import uuid
@@ -172,8 +173,11 @@ async def _diagnose_wsl() -> tuple[str, str]:
     if not rows:
         # `wsl -l -v` also fails when WSL works but has no distro at all, so
         # ask `wsl --version` whether WSL itself is there.
-        rc_version, _ = await _run_wsl_exe(["--version"], timeout=30)
-        return ("no_ubuntu" if rc_version == 0 else "no_wsl"), out
+        # Windows 10's built-in wsl.exe stub (before WSL is installed) prints
+        # its usage text for --version, so require an actual version number.
+        rc_version, version_out = await _run_wsl_exe(["--version"], timeout=30)
+        has_wsl = rc_version == 0 and re.search(r"\d+\.\d+\.\d+", version_out) is not None
+        return ("no_ubuntu" if has_wsl else "no_wsl"), out
     ubuntu = [r for r in rows if r[0] == LOCAL_DISTRO] or [r for r in rows if r[0].lower().startswith("ubuntu")]
     if not ubuntu:
         return "no_ubuntu", "Installed: " + ", ".join(r[0] for r in rows)
@@ -222,11 +226,13 @@ async def _check_driver() -> tuple[bool, str]:
 
 
 async def _install_wsl_elevated() -> tuple[bool, str]:
-    """Installing WSL itself needs administrator rights: runs wsl --install
-    through a UAC prompt and waits for it. On a PC without WSL this usually
-    installs only WSL and asks for a restart; Ubuntu is installed after that
-    by _install_ubuntu(). --no-launch skips opening an Ubuntu window."""
-    ps = (f"$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','{LOCAL_DISTRO}','--no-launch' "
+    """Installing WSL itself needs administrator rights: runs
+    `wsl --install --no-distribution` through a UAC prompt and waits for it.
+    Ubuntu is installed afterwards (usually after a restart) by
+    _install_ubuntu(). WSL only, no distro: Windows 10's built-in wsl.exe
+    stub rejects `-d Ubuntu-24.04` as an unknown distribution name, while
+    the WSL it installs accepts it."""
+    ps = ("$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','--no-distribution' "
           "-Verb RunAs -Wait -PassThru; exit $p.ExitCode")
     try:
         proc = await asyncio.create_subprocess_exec(
