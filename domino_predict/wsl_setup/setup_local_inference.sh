@@ -31,10 +31,15 @@ echo "=== [1/7] Checking GPU in WSL ==="
 nvidia-smi -L || { echo "ERROR: NVIDIA GPU is not visible inside WSL. Install/update the Windows NVIDIA driver first."; exit 1; }
 
 echo "=== [2/7] Creating Python environment ($VENV) ==="
+# PhysicsNeMo 2.2.2는 Python 3.11 이상이 필요하다. 기본 python3가 더 낮으면
+# (예: Ubuntu 22.04의 3.10) 3.11 이상을 설치한 뒤 PYTHON=python3.12 처럼 지정해서 실행한다.
+PYTHON="${PYTHON:-python3}"
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || {
+    echo "ERROR: $PYTHON is $("$PYTHON" --version 2>&1); PhysicsNeMo 2.2.2 needs Python 3.11+. Install python3.12 and run with PYTHON=python3.12."; exit 1; }
 if [ ! -x "$VENV/bin/python" ]; then
     mkdir -p "$(dirname "$VENV")"
     # python3-venv 패키지(sudo 필요)가 없어도 되도록 pip을 직접 설치한다.
-    python3 -m venv --without-pip "$VENV"
+    "$PYTHON" -m venv --without-pip "$VENV"
     wget -q -O /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py
     "$VENV/bin/python" /tmp/get-pip.py -q
 fi
