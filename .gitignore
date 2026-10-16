@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+# Shared training SSH key (bundled only in training copies, never committed)
+domino_predict/ssh/

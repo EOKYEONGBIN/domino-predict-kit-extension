@@ -103,6 +103,8 @@ WSL과 Ubuntu는 Microsoft Store 대신 GitHub에서 직접 받습니다(`--web-
 - SSH 서버 + 이 PC의 공개키 등록 (비밀번호 없이 접속). 익스텐션은 `~/.ssh/id_ed25519` 키를 사용합니다.
 - 서버에 `~/domino-ahmedml/scripts/run_prediction.sh`, 학습된 모델(`~/domino-ahmedml/model/`), 설정 파일이 있어야 합니다. 위 두 저장소를 참고하세요. 서버에도 위의 physicsnemo 패치와 cuML이 필요합니다.
 - `remote_predict.py`의 `SSH_USER`를 서버 계정명으로 바꾸고, 서버 IP는 UI에서 입력합니다.
+- **교육용 배포:** 익스텐션 폴더에 `ssh/id_ed25519`(공용 키)를 넣어 두면 교육생 PC의 `~/.ssh` 키 대신 그 키를 씁니다. 교육생은 키를 따로 등록할 필요가 없고, VDI처럼 사용자 프로필이 초기화되는 PC에서도 유지됩니다. 서버에는 그 공개키를 **권한 없는 교육 전용 계정**에만 등록하고, 교육이 끝나면 지우세요. 이 키는 절대 git에 올리지 마세요(`.gitignore`에 포함).
+- 처음 접속하는 서버의 호스트 키는 자동으로 받아들입니다(`StrictHostKeyChecking=accept-new`).
 
 ## 참고 측정 (같은 STL, Faces + Streamlines)
 

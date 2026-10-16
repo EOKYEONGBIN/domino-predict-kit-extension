@@ -20,6 +20,8 @@ import json
 import os
 import re
 import shlex
+import shutil
+import subprocess
 import tempfile
 import uuid
 
@@ -43,7 +45,50 @@ NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx"
 _distro: str | None = None
 
 SSH_USER = "YOUR_USER"  # SSH account on the inference server
+# A key shipped inside the extension folder (<extension>/ssh/id_ed25519) wins
+# over the user's own ~/.ssh key: a training copy can carry one shared key for
+# a restricted training account, so trainees register nothing per VM (and a
+# VDI profile reset can't lose it). Never commit such a key to git.
+BUNDLED_SSH_KEY = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ssh", "id_ed25519"
+)
 SSH_KEY_PATH = os.path.expanduser("~/.ssh/id_ed25519")
+# First connection to a server (e.g. one just moved to a new network) would
+# otherwise stop at the host-key prompt, which BatchMode turns into a failure.
+_SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-o", "StrictHostKeyChecking=accept-new"]
+
+
+def _ssh_key_path() -> str:
+    """The bundled key if present, else ~/.ssh/id_ed25519. OpenSSH for
+    Windows refuses a private key other users can read, and a key unpacked
+    from a zip can inherit such permissions -- so the bundled key is used
+    through a copy in the user's temp folder, readable by this user only."""
+    if not os.path.isfile(BUNDLED_SSH_KEY):
+        return os.path.expanduser("~/.ssh/id_ed25519")
+    dst = os.path.join(tempfile.gettempdir(), "domino_predict_id_ed25519")
+    user = os.environ.get("USERNAME", "")
+    domain = os.environ.get("USERDOMAIN", "")
+    account = f"{domain}\\{user}" if domain and user else user
+    with open(BUNDLED_SSH_KEY, "rb") as f:
+        key = f.read()
+    try:
+        with open(dst, "rb") as f:
+            same = f.read() == key
+    except OSError:
+        same = False
+    if not same:
+        if os.path.exists(dst) and os.name == "nt" and account:
+            subprocess.run(["icacls", dst, "/grant", f"{account}:F"], capture_output=True)
+        try:
+            os.remove(dst)
+        except OSError:
+            pass
+        shutil.copyfile(BUNDLED_SSH_KEY, dst)
+        if os.name == "nt" and account:
+            subprocess.run(["icacls", dst, "/inheritance:r", "/grant:r", f"{account}:R"], capture_output=True)
+        else:
+            os.chmod(dst, 0o600)
+    return dst
 REMOTE_REQUESTS_DIR = "~/domino-ahmedml/requests"
 REMOTE_RUN_SCRIPT = "~/domino-ahmedml/scripts/run_prediction.sh"
 REMOTE_MODEL_DIR = "~/domino-ahmedml/model"
@@ -64,9 +109,10 @@ _SCP_BASE: list[str] = []
 
 
 def _rebuild_command_bases() -> None:
-    global _SSH_BASE, _SCP_BASE
-    _SSH_BASE = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-i", SSH_KEY_PATH, f"{SSH_USER}@{SSH_HOST}"]
-    _SCP_BASE = ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-i", SSH_KEY_PATH]
+    global _SSH_BASE, _SCP_BASE, SSH_KEY_PATH
+    SSH_KEY_PATH = _ssh_key_path()
+    _SSH_BASE = ["ssh", *_SSH_OPTS, "-i", SSH_KEY_PATH, f"{SSH_USER}@{SSH_HOST}"]
+    _SCP_BASE = ["scp", *_SSH_OPTS, "-i", SSH_KEY_PATH]
 
 
 def load_settings() -> dict:
@@ -329,10 +375,7 @@ async def test_connection(mode: str, host: str = "") -> tuple[bool, str]:
     work (WSL2, GPU, installed environment), not just that wsl.exe exists."""
     if mode == MODE_LOCAL:
         return await _local_check()
-    cmd = [
-        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
-        "-i", SSH_KEY_PATH, f"{SSH_USER}@{host}", "echo ok",
-    ]
+    cmd = ["ssh", *_SSH_OPTS, "-i", SSH_KEY_PATH, f"{SSH_USER}@{host}", "echo ok"]
     try:
         output = await _run(cmd)
     except (PredictionError, OSError):
