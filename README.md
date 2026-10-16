@@ -84,6 +84,8 @@ domino_predict/                      ← 익스텐션 폴더
 | NVIDIA 드라이버가 580 미만 | 드라이버는 자동 설치하지 않고, 안내와 함께 NVIDIA 다운로드 페이지를 엽니다 (제조사·GPU마다 달라서 잘못 덮어쓰면 위험) |
 | 모두 준비됨 | 추론 환경 설치 (약 7GB, 처음에는 10~20분). sudo 불필요. 끝나면 자동으로 `Connect`(초록) |
 
+WSL과 Ubuntu는 Microsoft Store 대신 GitHub에서 직접 받습니다(`--web-download`). VDI VM처럼 임시·필수·로밍 사용자 프로필에서는 Store 설치가 "특수 프로필 배포가 허용되지 않기 때문에 배포 작업이 차단되었습니다" 오류로 막히기 때문입니다.
+
 잘 안 될 때 PowerShell에서 확인: `wsl --status`, `wsl -l -v`(설치된 배포판·버전), `wsl -d Ubuntu-24.04 -e bash -lc "echo ok"`.
 가상화 관련 오류가 나면 BIOS에서 가상화(VT-x / SVM)를 켜야 합니다.
 

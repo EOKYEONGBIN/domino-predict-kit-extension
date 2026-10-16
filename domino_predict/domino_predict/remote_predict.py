@@ -231,8 +231,10 @@ async def _install_wsl_elevated() -> tuple[bool, str]:
     Ubuntu is installed afterwards (usually after a restart) by
     _install_ubuntu(). WSL only, no distro: Windows 10's built-in wsl.exe
     stub rejects `-d Ubuntu-24.04` as an unknown distribution name, while
-    the WSL it installs accepts it."""
-    ps = ("$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','--no-distribution' "
+    the WSL it installs accepts it. --web-download fetches it from GitHub
+    instead of the Microsoft Store, whose installs are blocked for special
+    (temporary / mandatory / roaming) user profiles, common on VDI VMs."""
+    ps = ("$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','--no-distribution','--web-download' "
           "-Verb RunAs -Wait -PassThru; exit $p.ExitCode")
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -250,8 +252,9 @@ async def _install_wsl_elevated() -> tuple[bool, str]:
 async def _install_ubuntu() -> tuple[bool, str]:
     """Installs the Ubuntu distro into an existing WSL. Needs no administrator
     rights; --no-launch skips Ubuntu's window and its interactive user setup
-    (the distro then starts as root). Downloads ~300MB."""
-    rc, out = await _run_wsl_exe(["--install", "-d", LOCAL_DISTRO, "--no-launch"], timeout=1800)
+    (the distro then starts as root). --web-download skips the Microsoft
+    Store (blocked for special user profiles). Downloads ~300MB."""
+    rc, out = await _run_wsl_exe(["--install", "-d", LOCAL_DISTRO, "--no-launch", "--web-download"], timeout=1800)
     return rc == 0, out
 
 
